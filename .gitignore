@@ -17,6 +17,9 @@ keys.txt
 # direnv local state
 .direnv/
 
+# Rust build output (the envseal launcher crate lives in bin/)
+bin/target/
+
 # OS / editor cruft
 .DS_Store
 *.swp

@@ -1,0 +1,18 @@
+[package]
+name = "envseal"
+version = "0.1.0"
+edition = "2021"
+description = "Decrypt SOPS+age secrets and hand them to a child process, in-memory only."
+license = "MIT"
+
+[[bin]]
+name = "envseal"
+path = "src/main.rs"
+
+[dependencies]
+zeroize = "1"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"

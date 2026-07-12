@@ -21,6 +21,15 @@ reference**, never by value.
   intended — do not retry in a way that surfaces the value.
 - If you believe you genuinely need to see a secret's value, **STOP and ask the human.**
 
+## Unlocking (how secrets reach the environment)
+
+- The human unlocks with the `envseal` launcher: `envseal unlock` (spawns an unlocked
+  subshell) or `envseal unlock -- <cmd>` (runs one command with the secret env). It prompts
+  `[y/N]` and refuses without a TTY — you cannot drive it non-interactively, and you should
+  not try to. Decryption is a human-gated step.
+- Once the human has unlocked, you are running inside a shell that already has the vars.
+  Just use them by name — do not attempt to unlock, decrypt, or re-run `envseal` yourself.
+
 ## Working in this repo
 
 - Edit encrypted secrets with `sops secrets/secrets.enc.env` (opens an editor; re-encrypts

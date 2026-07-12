@@ -1,14 +1,16 @@
 # envseal
 
 A single **encrypted secrets file, checked into the repo**, unlocked per-user via
-**age keypairs**, decrypted through **SOPS**, loaded into your shell via **direnv with an
-explicit confirmation gate**, and hardened so an AI coding tool (Claude Code, Cursor, …)
-can *use* secrets by name **without their plaintext ever entering its context**.
+**age keypairs**, decrypted through **SOPS**, and handed to a child process by the
+**`envseal` launcher** (a small Rust binary with an explicit confirmation prompt) — so an
+AI coding tool (Claude Code, Cursor, …) can *use* secrets by name **without their
+plaintext ever entering its context**.
 
 - **Encryption:** SOPS (values-only, diffable) + age (per-user keypairs)
-- **Unlock:** direnv `.envrc` with a confirmation gate — no silent auto-decrypt
+- **Unlock:** `envseal` binary — interactive `[y/N]` prompt, in-memory only, no disk writes.
+  A direnv `.envrc` gate is included as an optional convenience (§4b).
 - **AI safety:** name-reference-only + command denylist + output-scanning hook
-- **Cross-platform:** macOS, Linux, Windows — Node / shell / Make / CI / mobile / cloud deploys
+- **Cross-platform:** macOS, Linux, Windows — one binary, no shell-quoting or direnv-on-Windows issues
 
 ---
 
@@ -32,26 +34,35 @@ that blocks any output containing a live secret value (§5).
 
 ```bash
 # 1. Install tooling (macOS shown; Linux/Windows in §1)
-brew install age sops direnv
-eval "$(direnv hook zsh)"        # add to ~/.zshrc
+brew install age sops
 
-# 2. Generate your age key (once per machine)
+# 2. Build the envseal launcher (needs Rust: https://rustup.rs)
+cargo build --release --manifest-path bin/Cargo.toml
+#   -> binary at bin/target/release/envseal  (copy it onto your PATH if you like)
+
+# 3. Generate your age key (once per machine)
 mkdir -p ~/.config/sops/age
 age-keygen -o ~/.config/sops/age/keys.txt
 #   -> copy the printed "Public key: age1..." into .sops.yaml
 
-# 3. Put your public key in .sops.yaml (replace the REPLACE_WITH_... line)
+# 4. Put your public key in .sops.yaml (replace the REPLACE_WITH_... line)
 
-# 4. Create the encrypted secrets file
+# 5. Create the encrypted secrets file
 sops secrets/secrets.enc.env    # editor opens; add KEY=value lines; saves encrypted
 
-# 5. Unlock for a session, then start your AI tool IN THIS SHELL
-direnv allow
-export SECRETS_UNLOCK=1 && direnv reload   # 🔓 secrets loaded
-claude                                      # inherits the env; uses secrets by name
+# 6a. Start your AI tool in an unlocked subshell:
+bin/target/release/envseal unlock          # prompts [y/N], then spawns a subshell
+claude                                       # inherits the env; uses secrets by name
+
+# 6b. …or run a single command with secrets, which die when it exits:
+bin/target/release/envseal unlock -- npm run build
+bin/target/release/envseal unlock -- fly deploy
 ```
 
-Leaving the directory (`cd ..`) auto-unloads the vars.
+The launcher decrypts in-memory, hands the env to the child process only, and zeroizes
+its own copy after spawning. Values are never printed; on unlock it lists variable
+**names** only. It refuses to run non-interactively (no TTY → no unlock), so CI must use a
+dedicated key (§6).
 
 ---
 
@@ -63,10 +74,12 @@ Native binaries on all platforms — no WSL needed.
 |------|-------|-------|---------|
 | age | `brew install age` | pkg mgr / release | `scoop install age` / `winget install FiloSottile.age` |
 | sops | `brew install sops` | release binary | `scoop install sops` / `winget install getsops.sops` |
-| direnv | `brew install direnv` | pkg mgr | `scoop install direnv` |
+| Rust (to build `envseal`) | `rustup` | `rustup` | `rustup` |
+| direnv (optional, §4b) | `brew install direnv` | pkg mgr | not native — WSL only |
 
-direnv shell hook (once): bash `eval "$(direnv hook bash)"` · zsh `eval "$(direnv hook zsh)"`
-· fish `direnv hook fish | source` · pwsh `Invoke-Expression "$(direnv hook pwsh)"`.
+Build the launcher once: `cargo build --release --manifest-path bin/Cargo.toml`. Copy
+`bin/target/release/envseal` (`.exe` on Windows) somewhere on your PATH, or call it by
+path. It shells out to `sops`, so `sops` must be installed and on PATH.
 
 ## 2. Per-user age keys
 
@@ -89,11 +102,32 @@ sops updatekeys secrets/secrets.enc.env # after changing recipients in .sops.yam
 ```
 SOPS encrypts **values**, leaving keys visible so `git diff` shows *which* secret changed.
 
-## 4. The direnv unlock gate
+## 4. Unlocking
 
-See `.envrc`. Two safety layers: direnv won't run `.envrc` until `direnv allow` (so a
-malicious PR edit can't auto-execute), and the gate requires `SECRETS_UNLOCK=1` so merely
-`cd`-ing in never silently decrypts. Windows alternative: `. .\scripts\unlock.ps1`.
+### 4a. The `envseal` launcher (primary, all platforms)
+
+```bash
+envseal unlock                     # prompt [y/N] → spawn an unlocked subshell
+envseal unlock -- <cmd> [args...]  # prompt [y/N] → run one command with the secret env
+```
+
+- Decrypts via `sops` **in memory** — never writes plaintext to disk or a shell variable.
+- Hands the env to the child process only; zeroizes its own copy after spawn.
+- Prints variable **names** on unlock, never values.
+- **Refuses to run without a TTY** — so it can't be silently driven in a pipe or CI. This
+  is a deliberate part of the confirmation gate. For automation, use `sops exec-env` with a
+  dedicated key instead (§6).
+
+Searches upward from the CWD for `secrets/secrets.enc.env`, so it works from any
+subdirectory of the repo.
+
+### 4b. direnv gate (optional convenience, Unix / WSL)
+
+`.envrc` offers a `cd`-based unlock **if you already use direnv** (macOS/Linux/WSL — direnv
+has no native Windows build). Two safety layers: direnv won't run `.envrc` until
+`direnv allow`, and the gate requires `SECRETS_UNLOCK=1` so entering the directory never
+silently decrypts. On Windows without WSL, use the `envseal` launcher (§4a) — that's the
+recommended path everywhere anyway.
 
 ## 5. Hardened AI guardrails
 
