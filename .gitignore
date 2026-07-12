@@ -1,0 +1,22 @@
+# Never commit plaintext secrets or private keys.
+# The ONLY secrets file that belongs in git is secrets/*.enc.env (encrypted).
+
+# Decrypted / plaintext env files
+*.dec.env
+*.decrypted
+.env
+.env.*
+!.env.example
+
+# age / private keys
+keys.txt
+*.age
+*.age.key
+*.agekey
+
+# direnv local state
+.direnv/
+
+# OS / editor cruft
+.DS_Store
+*.swp

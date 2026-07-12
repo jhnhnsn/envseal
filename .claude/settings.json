@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(env)",
+      "Bash(env:*)",
+      "Bash(printenv)",
+      "Bash(printenv:*)",
+      "Bash(echo $*)",
+      "Bash(set)",
+      "Bash(export -p)",
+      "Bash(cat *keys.txt*)",
+      "Bash(cat *.dec.env*)",
+      "Bash(sops -d:*)",
+      "Bash(sops --decrypt:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/scripts/redact-guard.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
