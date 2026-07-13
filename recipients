@@ -1,0 +1,4 @@
+# envseal recipients — age PUBLIC keys that can decrypt the store.
+# One `age1...` per line; add a `# Name` label if you like.
+# After editing, run `envseal reencrypt` (or add/remove-recipient) to re-key the store.
+age1fr7sffq2gpsqv9zvqsvn7cl4ac090r9u9skvyjm9mnleaaktjekqjt7m7l  # me
