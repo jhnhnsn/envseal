@@ -42,151 +42,93 @@ cargo build --release --manifest-path bin/Cargo.toml   # → bin/target/release/
 
 ## Usage scenarios
 
-Everything below is copy-pasteable. Values are always referenced by **name**; the plaintext
-only ever lives inside the child process envseal spawns.
+Secrets are always referenced by **name**; the plaintext only ever lives inside the child
+process envseal spawns.
 
-### 1. First-time setup on a new repo
+### 1. First-time setup
 
 ```bash
-cd my-project
 envseal init
-#   ✔ generated identity at ~/.config/envseal/identity.txt
-#   ✔ added you to my-project/recipients
-#   ✔ created empty store at my-project/secrets/secrets.enc
-#      your public key: age1fr7sffq...jt7m7l
-
-git add recipients secrets/secrets.enc
-git commit -m "Add envseal secrets store"
+git add recipients secrets/secrets.enc && git commit -m "Add envseal store"
 ```
 
-`init` is idempotent — safe to re-run. Your private key stays in `~/.config/envseal/`; only the
-`recipients` list and the encrypted store belong in git.
+`init` creates your private key (in `~/.config/envseal/`, never committed), the `recipients`
+list, and an empty store. Idempotent.
 
-### 2. Add and edit secrets
+### 2. Add and list secrets
 
 ```bash
-# One at a time — the value comes from stdin, so it never lands on the command line
-# (or in your shell history):
-printf 'sk-proj-abc123'            | envseal set OPENAI_API_KEY
-pbpaste                            | envseal set STRIPE_SECRET_KEY   # paste from clipboard
-op read op://vault/fly/token       | envseal set FLY_API_TOKEN       # pull from 1Password
-
-# …or edit them all at once in your editor (decrypt → edit → re-encrypt; temp file shredded):
-envseal edit
-
-# See what's stored (names only, never values):
-envseal list
-#   OPENAI_API_KEY
-#   STRIPE_SECRET_KEY
-#   FLY_API_TOKEN
-
-git add secrets/secrets.enc && git commit -m "Add API secrets"
+printf 'sk-proj-abc123' | envseal set OPENAI_API_KEY   # value from stdin, not the command line
+envseal edit                                           # …or edit them all in $EDITOR
+envseal list                                           # names only, never values
 ```
 
-### 3. Run a build/deploy that needs secrets
+### 3. Run something that needs secrets
 
-`envseal unlock -- <cmd>` runs one command with **every** secret set as an env var, then the
-secrets die with the process:
+`envseal unlock -- <cmd>` runs one command with every secret set as an env var:
 
 ```bash
 envseal unlock -- npm run build
 envseal unlock -- flyctl deploy
-envseal unlock -- terraform apply
-
-# When a tool wants the value as a flag, reference it by name inside a shell:
-envseal unlock -- sh -c 'curl -H "Authorization: Bearer $OPENAI_API_KEY" https://api.openai.com/v1/models'
 envseal unlock -- sh -c 'psql "$DATABASE_URL" -f migrate.sql'
 ```
 
-You typed `$OPENAI_API_KEY` — six inert characters. The shell expands it *inside the child*, so
-the value reaches `curl` but never your history or a log.
+You typed `$DATABASE_URL` — the shell expands it *inside the child*, so the value reaches `psql`
+but never your history or a log.
 
-### 4. Working with an AI coding agent (the main event)
+### 4. Working with an AI agent
 
-Start your agent from an unlocked subshell so every command it runs inherits the secrets:
+Start the agent from an unlocked subshell; every command it runs inherits the secrets:
 
 ```bash
-envseal unlock          # spawns a subshell with all secrets set
-claude                  # or `cursor`, etc. — launched INSIDE the unlocked shell
-# … work with the agent; it references $OPENAI_API_KEY by name and it just works …
-exit                    # leaving the subshell "locks" — the vars are gone
+envseal unlock     # subshell with all secrets set; `exit` locks
+claude             # launched inside it — references $OPENAI_API_KEY by name
 ```
 
-Now the agent can run `deploy --token "$FLY_API_TOKEN"` and the token resolves — but the agent
-only ever *wrote* the string `$FLY_API_TOKEN`. It never sees, and can't print, the value:
+If the agent tries to read a value directly, it can't — `envseal get` masks under an agent:
 
 ```bash
-# If the agent (or anyone) tries to read a value directly under an agent session:
-envseal get FLY_API_TOKEN
-#   ••••••••
-#   envseal: value masked (running under an agent or a terminal)…
+envseal get FLY_API_TOKEN    # → ••••••••  (see "Why this is AI-safe")
 ```
 
-That mask is the guarantee working. (See [Why this is AI-safe](#why-this-is-ai-safe).)
+### 5. Read a value yourself
 
-### 5. Human scripting — when you actually want the value
-
-Outside an agent, `envseal get` prints the value when its output is captured (a pipe or
-`$(…)`), so you can script with it. `--show` forces it anywhere:
+Outside an agent, `envseal get` prints the value when its output is captured; `--show` forces it:
 
 ```bash
-export GITHUB_TOKEN="$(envseal get GITHUB_TOKEN)"     # into a var for a one-off
-envseal get DATABASE_URL --show | pbcopy              # copy to clipboard
-docker run -e OPENAI_API_KEY="$(envseal get OPENAI_API_KEY)" myimage
+export GITHUB_TOKEN="$(envseal get GITHUB_TOKEN)"
+envseal get DATABASE_URL --show
 ```
 
 ### 6. Onboard a teammate
 
 ```bash
-# Teammate (Alice): clone the repo, then generate her key and print it.
-git clone …/my-project && cd my-project
-envseal init            # adds her to `recipients`; prints her public key: age1abc…
-envseal pubkey          # …or reprint it any time — safe to paste in Slack/email/a PR
-#   ⚠️ adding your key here does NOT let you decrypt yet — a current member must re-key.
+# Alice: generate her key and share the public half (safe to paste anywhere).
+envseal init && envseal pubkey        # → age1abc…
 
-# You (existing member): add Alice's key and re-encrypt the store to include her.
+# You: add her, re-encrypt, commit.
 envseal add-recipient age1abc… alice
-git add recipients secrets/secrets.enc && git commit -m "Add Alice" && git push
-
-# Alice pulls — now she can decrypt with her own key:
-git pull && envseal list
+git add recipients secrets/secrets.enc && git commit -m "Add Alice"
 ```
 
-> **What's actually shared:** only the **public** key (`age1…`), which is not a secret —
-> knowing it lets you *encrypt to* someone, never decrypt. So the channel doesn't need to be
-> confidential (Slack, email, a PR are all fine), but it should be *authentic*: make sure the
-> `age1…` really is your teammate's. The safest path is to have them add their own key line in
-> a **pull request** — the key is in the diff, tied to their identity, and recorded in git
-> history. The **private** key (`AGE-SECRET-KEY-…` in `~/.config/envseal/identity.txt`) is
-> never shared, pasted, or committed; if one ever leaks, rotate that person's key *and* every
-> secret it could decrypt.
+Only the **public** key (`age1…`) is shared — it lets you encrypt *to* someone, never decrypt.
+The private key (`~/.config/envseal/identity.txt`) is never shared or committed.
 
-### 7. Offboard a teammate (and actually revoke)
+### 7. Offboard a teammate
 
 ```bash
 envseal remove-recipient alice
-#   ✔ removed recipient; N remain.
-#   ✔ re-encrypted store to N recipient(s).
-#   ⚠️ Removing a recipient only blocks FUTURE decryptions. Rotate every secret
-#      they saw at the source to truly revoke.
-
-# Rotation is the real revocation — regenerate each secret at its provider and re-set it:
-op read op://vault/fly/new-token | envseal set FLY_API_TOKEN
-# …repeat for every secret Alice could see…
-
-git add recipients secrets/secrets.enc && git commit -m "Remove Alice, rotate secrets"
 ```
+
+This re-encrypts without Alice, but her key still decrypts old commits. **Rotation is the real
+revocation:** regenerate each secret she saw and `envseal set` the new value.
 
 ### 8. CI / automation
 
-envseal reads the identity from `$ENVSEAL_IDENTITY` if set, so give CI a **dedicated** key:
+Point `$ENVSEAL_IDENTITY` at a dedicated CI key (added as a recipient, stored as a CI secret):
 
-```yaml
-# Add the CI key as a recipient once:  envseal add-recipient <ci-age1…> ci-runner
-# Store the PRIVATE ci key as a masked CI secret, then in the job:
-- run: |
-    printf '%s' "$ENVSEAL_CI_KEY" > /tmp/ci-identity && chmod 600 /tmp/ci-identity
-    ENVSEAL_IDENTITY=/tmp/ci-identity envseal unlock -- npm run deploy
+```bash
+ENVSEAL_IDENTITY=/path/to/ci-key envseal unlock -- npm run deploy
 ```
 
 ---
