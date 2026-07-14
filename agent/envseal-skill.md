@@ -1,13 +1,18 @@
 ---
 name: envseal
-description: Use envseal to access encrypted secrets in this repo — reference secrets by name, run commands that need them, and onboard to the shared store. Load this whenever a task needs an API key, token, password, database URL, or any secret (e.g. deploy, call an authed API, run migrations, set an env var), when `envseal` commands fail, or when a teammate needs to be added to the secret store.
+description: Use envseal to access encrypted secrets in a repo that uses it — reference secrets by name, run commands that need them, and onboard to the shared store. Load this whenever a task needs an API key, token, password, database URL, or any secret (e.g. deploy, call an authed API, run migrations, set an env var), when `envseal` commands fail, or when a teammate needs to be added to the secret store. Only applies if the repo has a `recipients` file and `secrets/secrets.enc`.
 ---
 
 # Using envseal
 
-This repo stores secrets in an **age-encrypted key-value store** (`secrets/secrets.enc`).
-`envseal` is a single self-contained binary — no `sops`/`age` CLIs needed. Secrets are used
-**by name**; their plaintext must never enter your output, a tool-call argument, or a file.
+envseal manages secrets as an **age-encrypted key-value store** (`secrets/secrets.enc`)
+committed to a repo. `envseal` is a single self-contained binary — no `sops`/`age` CLIs needed.
+Secrets are used **by name**; their plaintext must never enter your output, a tool-call
+argument, or a file.
+
+**Does this repo use envseal?** It does if there's a `recipients` file and `secrets/secrets.enc`
+at the repo root (`envseal list` succeeds). If not, this skill doesn't apply — the repo may use
+a plain `.env` or another secrets tool.
 
 ## The one rule
 
@@ -28,8 +33,8 @@ envseal unlock -- sh -c 'psql "$DATABASE_URL" -f migrate.sql'
 envseal unlock -- sh -c 'curl -H "Authorization: Bearer $MY_SUPER_SECRET_KEY" https://api.example.com'
 ```
 
-You write the literal string `$DATABASE_URL` — six inert characters. Never substitute the
-actual value yourself.
+You write the literal string `$DATABASE_URL` — inert characters. Never substitute the actual
+value yourself.
 
 ## Discovering what's available
 
@@ -50,13 +55,16 @@ explicitly ask.
 
 ## Adding / changing a secret
 
+Do NOT put the value as a command-line argument (it lands in shell history). Have the human
+provide it via stdin — a paste from their password manager, an interactive prompt, or a file:
+
 ```bash
-printf 'the-value' | envseal set SOME_TOKEN      # value via stdin, never on the command line
-envseal set TLS_KEY < key.pem                    # multi-line value (PEM, cert, JSON): pipe it
+pbpaste | envseal set SOME_TOKEN                 # human pastes from clipboard (macOS)
+envseal set SOME_TOKEN                            # interactive: prompts, human types + Enter
+envseal set TLS_KEY < key.pem                     # multi-line value (PEM, cert, JSON) from a file
 ```
 
-Never put the literal value as a command-line argument. After changing secrets, remind the
-human to `git add secrets/secrets.enc && git commit`.
+After changing secrets, remind the human to `git add secrets/secrets.enc && git commit`.
 
 ## Common failures and what they mean
 
@@ -65,11 +73,9 @@ human to `git add secrets/secrets.enc && git commit`.
   run `envseal init` in a repo that already has a store elsewhere.
 - **`decryption failed: No matching keys found`** — the current identity isn't a recipient of
   this store. The human needs to be added (see Onboarding) and the store re-encrypted.
-- **`envseal set` seems to hang** — it's waiting on stdin. Pipe the value
-  (`printf 'v' | envseal set NAME`) instead of running it bare.
-- **`command not found: envseal`** — the binary isn't installed. Point the human to the
-  one-line installer in `ONBOARDING.md` (a `curl … | sh` that needs no toolchain), or
-  `cargo install --path bin` if they have Rust.
+- **`envseal set` seems to hang** — it's waiting on stdin. Have the human pipe or type the value.
+- **`command not found: envseal`** — not installed. Point the human at the installer:
+  `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.sh | sh`
 
 ## Onboarding a teammate to the shared store
 
@@ -95,14 +101,17 @@ envseal remove-recipient alice
 ```
 
 This re-encrypts without them, but their key still decrypts old commits. **Rotation is the real
-revocation:** for every secret they could see, regenerate it at its source and
-`printf 'new' | envseal set NAME`. Remind the human of this — the command prints the warning
-too.
+revocation:** for every secret they could see, regenerate it at its source and re-set it. Remind
+the human — the command prints the warning too.
+
+## Hardening a repo for agents
+
+To steer/block an agent from exposing a value (skill + denylist + output-guard hook), see
+https://github.com/jhnhnsn/envseal/blob/main/GUARDRAILS.md — a human or an agent can follow it.
 
 ## What you must never do
 
-- Never run `env`, `printenv`, `echo $SECRET`, `set`, or anything that dumps a value. These are
-  denied by the repo's settings and a `PostToolUse` hook will block leaked output.
+- Never run `env`, `printenv`, `echo $SECRET`, `set`, or anything that dumps a value.
 - Never write a secret's value into a file, a commit, or your reply.
 - Never run `envseal get ... --show` on the human's behalf unless they explicitly ask to see it.
 - If you think you truly need a plaintext value, **stop and ask the human.**

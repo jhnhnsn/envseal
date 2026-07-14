@@ -47,8 +47,9 @@ install options in [ONBOARDING.md](./ONBOARDING.md#1-install-envseal-once-per-ma
 from source (needs [Rust](https://rustup.rs)): `cargo install --path bin`.
 
 **Joining a team that already uses envseal?** See **[ONBOARDING.md](./ONBOARDING.md)** — install,
-share your key, get added. An **AI-agent skill is bundled** in `.claude/skills/envseal/`, so
-Claude Code (and compatible agents) automatically know how to use secrets by name in this repo.
+share your key, get added. A ready-made **AI-agent skill** ([`agent/envseal-skill.md`](./agent/envseal-skill.md))
+teaches Claude Code to use secrets by name — install it globally or per-repo (see
+[GUARDRAILS.md](./GUARDRAILS.md)).
 
 ---
 

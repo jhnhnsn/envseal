@@ -1,8 +1,8 @@
 # Onboarding to this repo's secrets
 
 This project uses [envseal](./README.md) to share encrypted secrets through git. Getting set
-up is three steps. Your AI agent (Claude Code, etc.) already knows how to use envseal — the
-`.claude/skills/envseal/` skill ships with this repo, so it loads automatically.
+up is three steps. To teach your AI agent (Claude Code, etc.) how to use envseal, install the
+skill — see [Hardening your repo for AI agents](#hardening-your-repo-for-ai-agents) below.
 
 ## 1. Install envseal (once per machine)
 
