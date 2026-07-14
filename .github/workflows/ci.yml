@@ -39,7 +39,8 @@ jobs:
         working-directory: bin
         run: |
           $env:ENVSEAL_IDENTITY = Join-Path $env:RUNNER_TEMP 'envseal-id.txt'
-          $bin = '.\target\release\envseal.exe'
+          # Workspace target dir is at the repo root, one level up from this job's cwd (bin/).
+          $bin = '..\target\release\envseal.exe'
           $expected = 'sk-windows-CI-value'
 
           & $bin init
