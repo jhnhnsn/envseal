@@ -32,11 +32,16 @@ call, or its transcript. You only ever type the variable **name**.
 ## Install
 
 ```bash
-# Needs Rust (https://rustup.rs). No other tools required.
-cargo install --path bin          # → ~/.cargo/bin/envseal (on your PATH)
-#   or, without installing:
-cargo build --release --manifest-path bin/Cargo.toml   # → bin/target/release/envseal
+# macOS / Linux — prebuilt binary, no toolchain needed:
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.sh | sh
 ```
+```powershell
+# Windows (PowerShell):
+powershell -c "irm https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.ps1 | iex"
+```
+
+Installs to `~/.local/bin`. Or build from source (needs [Rust](https://rustup.rs)):
+`cargo install --path bin`.
 
 **Joining a team that already uses envseal?** See **[ONBOARDING.md](./ONBOARDING.md)** — install,
 share your key, get added. An **AI-agent skill is bundled** in `.claude/skills/envseal/`, so

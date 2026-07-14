@@ -2,8 +2,9 @@
 name = "envseal"
 version = "0.1.0"
 edition = "2021"
-description = "A local, file-based GitHub Secrets: an age-encrypted key-value store surfaced by name."
+description = "An age-encrypted key-value secret store, committed to your repo and surfaced by name."
 license = "MIT"
+repository = "https://github.com/jhnhnsn/envseal"
 
 [[bin]]
 name = "envseal"

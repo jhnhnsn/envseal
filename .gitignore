@@ -19,7 +19,9 @@ keys.txt
 # envseal edit temp file (should be shredded, but never commit it)
 .envseal-edit.tmp
 
-# Rust build output (the envseal binary crate lives in bin/)
+# Rust build output. With the workspace root Cargo.toml, output lands in ./target;
+# bin/target is kept ignored too in case the crate is built in isolation.
+/target/
 bin/target/
 
 # OS / editor cruft

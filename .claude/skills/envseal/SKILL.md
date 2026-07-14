@@ -67,9 +67,9 @@ human to `git add secrets/secrets.enc && git commit`.
   this store. The human needs to be added (see Onboarding) and the store re-encrypted.
 - **`envseal set` seems to hang** — it's waiting on stdin. Pipe the value
   (`printf 'v' | envseal set NAME`) instead of running it bare.
-- **`command not found: envseal`** — the binary isn't installed. Tell the human to run
-  `cargo install --path bin` from the repo (or build with
-  `cargo build --release --manifest-path bin/Cargo.toml`).
+- **`command not found: envseal`** — the binary isn't installed. Point the human to the
+  one-line installer in `ONBOARDING.md` (a `curl … | sh` that needs no toolchain), or
+  `cargo install --path bin` if they have Rust.
 
 ## Onboarding a teammate to the shared store
 

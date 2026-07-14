@@ -6,11 +6,27 @@ up is three steps. Your AI agent (Claude Code, etc.) already knows how to use en
 
 ## 1. Install envseal (once per machine)
 
-Needs [Rust](https://rustup.rs). No other tools.
+One line — downloads a prebuilt binary, no toolchain required:
 
 ```bash
-cargo install --path bin        # → ~/.cargo/bin/envseal (on your PATH)
+# macOS / Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.sh | sh
 ```
+```powershell
+# Windows (PowerShell)
+powershell -c "irm https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.ps1 | iex"
+```
+
+Installs to `~/.local/bin` and adds it to your PATH. Restart your shell (or `source ~/.profile`)
+if `envseal` isn't found. Prefer to inspect first? Download the `.sh` and read it before running.
+
+<details>
+<summary>Build from source instead (needs <a href="https://rustup.rs">Rust</a>)</summary>
+
+```bash
+cargo install --path bin        # → ~/.cargo/bin/envseal
+```
+</details>
 
 ## 2. Create your key and share it
 
