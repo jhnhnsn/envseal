@@ -41,8 +41,16 @@ gh release download v0.1.0 --repo jhnhnsn/envseal --pattern '*apple-darwin*'
 shasum -a 256 -c envseal-*.tar.xz.sha256      # must print "OK"
 ```
 
-Installs to `~/.local/bin` and adds it to your PATH. Restart your shell (or `source ~/.profile`)
-if `envseal` isn't found.
+Installs to `~/.local/bin` and adds it to your PATH — **for new shells.** Your *current*
+terminal won't see it yet, so **open a new terminal** (or run `source ~/.local/bin/env`) before
+continuing. Then confirm:
+
+```bash
+envseal --version               # e.g. envseal 0.1.1
+```
+
+If `envseal: command not found` in the same terminal you installed from, that's expected —
+open a fresh terminal. The install didn't fail.
 
 <details>
 <summary>Build from source instead (needs <a href="https://rustup.rs">Rust</a>)</summary>

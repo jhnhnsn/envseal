@@ -17,3 +17,7 @@ targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-da
 install-path = "~/.local/bin"
 # Whether to install an updater program
 install-updater = false
+# Printed after a successful install. The installer edits shell rc files so NEW shells find
+# envseal, but the CURRENT shell won't until it's reloaded — call that out so nobody thinks
+# the install failed when `envseal` isn't found in the same terminal.
+install-success-msg = "envseal installed. Open a NEW terminal (or run: source ~/.local/bin/env), then check it with: envseal --version"

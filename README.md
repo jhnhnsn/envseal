@@ -40,10 +40,11 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/release
 powershell -c "irm https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.ps1 | iex"
 ```
 
-Installs to `~/.local/bin`. The installer verifies the binary's SHA-256 and enforces TLS. To
-inspect the script first, or verify checksums by hand, see the install options in
-[ONBOARDING.md](./ONBOARDING.md#1-install-envseal-once-per-machine). Or build from source (needs
-[Rust](https://rustup.rs)): `cargo install --path bin`.
+Installs to `~/.local/bin` — **open a new terminal** (or `source ~/.local/bin/env`) before
+running `envseal`, then `envseal --version` to confirm. The installer verifies the binary's
+SHA-256 and enforces TLS. To inspect the script first, or verify checksums by hand, see the
+install options in [ONBOARDING.md](./ONBOARDING.md#1-install-envseal-once-per-machine). Or build
+from source (needs [Rust](https://rustup.rs)): `cargo install --path bin`.
 
 **Joining a team that already uses envseal?** See **[ONBOARDING.md](./ONBOARDING.md)** — install,
 share your key, get added. An **AI-agent skill is bundled** in `.claude/skills/envseal/`, so
