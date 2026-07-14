@@ -69,9 +69,16 @@ list, and an empty store. Idempotent.
 
 ### 2. Add and list secrets
 
+Copy a secret from your password manager, then paste it into `set` — the value comes from
+**stdin**, so it never lands on the command line or in your shell history:
+
 ```bash
-envseal set OPENAI_API_KEY                             # prompts; type the value + Enter
-printf 'sk-proj-abc123' | envseal set OPENAI_API_KEY   # …or pipe it (off the command line)
+pbpaste | envseal set OPENAI_API_KEY                   # macOS: paste from clipboard
+# Linux (wayland): wl-paste | envseal set OPENAI_API_KEY
+# Linux (X11):     xclip -o  | envseal set OPENAI_API_KEY
+
+envseal set OPENAI_API_KEY                             # …or run bare, then paste + Enter
+printf 'sk-proj-abc123' | envseal set OPENAI_API_KEY   # …or pipe a literal
 envseal edit                                           # …or edit them all in $EDITOR
 envseal list                                           # names only, never values
 ```

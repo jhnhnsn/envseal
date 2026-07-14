@@ -22,6 +22,13 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/release
 powershell -c "irm https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.ps1 | iex"
 ```
 
+To install somewhere other than `~/.local/bin`, set `ENVSEAL_INSTALL_DIR` first — e.g. a dir
+already on your PATH:
+
+```bash
+ENVSEAL_INSTALL_DIR="$HOME/bin" curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.sh | sh
+```
+
 **Safer** — download, read it, then run it:
 
 ```bash
@@ -34,10 +41,10 @@ sh envseal-installer.sh
 binary and its checksum yourself:
 
 ```bash
-gh release download v0.1.0 --repo jhnhnsn/envseal --pattern '*installer.sh' -O envseal-installer.sh
+gh release download v0.1.1 --repo jhnhnsn/envseal --pattern '*installer.sh' -O envseal-installer.sh
 sh envseal-installer.sh
 #   …or download your platform's archive + its .sha256 and verify by hand:
-gh release download v0.1.0 --repo jhnhnsn/envseal --pattern '*apple-darwin*'
+gh release download v0.1.1 --repo jhnhnsn/envseal --pattern '*apple-darwin*'
 shasum -a 256 -c envseal-*.tar.xz.sha256      # must print "OK"
 ```
 
@@ -53,17 +60,39 @@ If `envseal: command not found` in the same terminal you installed from, that's 
 open a fresh terminal. The install didn't fail.
 
 <details>
-<summary>Build from source instead (needs <a href="https://rustup.rs">Rust</a>)</summary>
+<summary>Clone and build from source (needs <a href="https://rustup.rs">Rust</a>)</summary>
+
+For contributors, or to install to a directory you choose:
 
 ```bash
-cargo install --path bin        # → ~/.cargo/bin/envseal
+git clone https://github.com/jhnhnsn/envseal.git
+cd envseal
+
+# Option A — install onto your PATH via cargo (→ ~/.cargo/bin/envseal):
+cargo install --path bin
+
+# Option B — build, then copy the binary wherever you want:
+cargo build --release
+cp target/release/envseal ~/bin/          # …or /usr/local/bin, or any dir on your PATH
 ```
+
+`cargo install` puts it in `~/.cargo/bin` (already on PATH if you have Rust). Option B lets you
+pick the exact location.
 </details>
 
 ## 2. Create your key and share it
 
+> **envseal works per project directory.** Every command operates on the secret store of the
+> repo you're currently *inside* — it looks for a `recipients` file in the current directory and
+> walks up to find the project root. So always `cd` into the project first. One machine, one
+> personal key (in `~/.config/envseal/`), but each repo has its own `recipients` + encrypted
+> store. Running a command outside any envseal repo gives you "no `recipients` file found."
+
+From inside the project:
+
 ```bash
-envseal init                    # generates your private key + creates your recipients entry
+cd ~/path/to/the-project        # ← be in the repo; envseal acts on THIS repo's store
+envseal init                    # generates your private key (once) + your recipients entry here
 envseal pubkey                  # prints your PUBLIC key (age1...) — safe to share
 ```
 
