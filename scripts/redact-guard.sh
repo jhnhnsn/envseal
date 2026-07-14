@@ -39,7 +39,7 @@ leaked=0
 # other encodings (hex, url-encoding, gzip) can still evade it — see the README threat model.
 while IFS='=' read -r name value; do
   case "$name" in
-    *_KEY|*_TOKEN|*_SECRET|*_PASSWORD|*_PASSWD|API_*|*_API_KEY|*_PRIVATE_KEY)
+    *_KEY|*_TOKEN|*_SECRET|*_PASSWORD|*_PASSWD|API_*)
       # Skip trivially short / empty values to avoid false positives.
       [ "${#value}" -ge 8 ] || continue
       if printf '%s' "$output" | grep -qF -- "$value"; then

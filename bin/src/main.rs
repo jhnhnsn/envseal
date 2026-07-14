@@ -1,6 +1,6 @@
-//! envseal — a local, file-based "GitHub Secrets": an age-encrypted key-value store committed
-//! to the repo, decrypted with each user's own age key, surfaced by NAME so neither a human
-//! nor an agent has to paste a literal secret value onto a command line.
+//! envseal — an age-encrypted key-value store committed to the repo, decrypted with each user's
+//! own age key, surfaced by NAME so neither a human nor an agent has to paste a literal secret
+//! value onto a command line.
 //!
 //! Commands:
 //!   envseal get <NAME> [--show]     Resolve one secret by name (masked under an agent).

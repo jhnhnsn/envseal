@@ -2,9 +2,9 @@
 
 This repo stores an **age-encrypted key-value store** (`secrets/secrets.enc`) checked into git.
 Each collaborator decrypts it with **their own age private key**. Secrets are surfaced **by
-name** so their plaintext never has to be pasted onto a command line. Think of it as a local,
-file-based GitHub Secrets. All crypto is the `age` crate compiled into the `envseal` binary —
-there are no external tools (`sops`/`age` CLIs) to install or invoke.
+name** so their plaintext never has to be pasted onto a command line. All crypto is the `age`
+crate compiled into the `envseal` binary — there are no external tools (`sops`/`age` CLIs) to
+install or invoke.
 
 ## Secret handling — MANDATORY
 

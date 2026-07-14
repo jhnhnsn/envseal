@@ -1,9 +1,8 @@
 # envseal
 
-A local, file-based **GitHub Secrets**: an **age-encrypted key-value store committed to your
-repo**, decrypted with each collaborator's **own age key**, surfaced **by name** so neither a
-human nor an AI coding agent (Claude Code, Cursor, …) has to paste a secret's plaintext onto a
-command line.
+An **age-encrypted key-value store committed to your repo**, decrypted with each collaborator's
+**own age key** and surfaced **by name** — so neither a human nor an AI coding agent (Claude
+Code, Cursor, …) has to paste a secret's plaintext onto a command line.
 
 - **Self-contained:** one Rust binary. All crypto is the [`age`](https://crates.io/crates/age)
   crate (X25519 + ChaCha20-Poly1305) compiled in — **no `sops`, no `age` CLI, nothing else to

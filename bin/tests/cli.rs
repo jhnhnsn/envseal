@@ -139,7 +139,7 @@ fn store_is_encrypted(path: &Path, plaintext_needle: &str) {
     assert!(
         as_text.starts_with("age-encryption.org/") || bytes.starts_with(b"age"),
         "store should be an age file, got {:?}...",
-        &as_text.chars().take(30).collect::<String>()
+        as_text.chars().take(30).collect::<String>()
     );
     assert!(
         !as_text.contains(plaintext_needle),

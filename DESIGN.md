@@ -2,10 +2,10 @@
 
 ## What it is
 
-A local, file-based version of GitHub Secrets. An **encrypted key–value file lives in the
-git repo**; each collaborator decrypts it with their **own age private key** (the file is
-encrypted to everyone's public keys). Secrets are surfaced **by name** so that neither a
-human nor an agent has to paste a literal value onto a command line.
+An **encrypted key–value file lives in the git repo**; each collaborator decrypts it with
+their **own age private key** (the file is encrypted to everyone's public keys). Secrets are
+surfaced **by name** so that neither a human nor an agent has to paste a literal value onto a
+command line.
 
 ## The job (one sentence)
 

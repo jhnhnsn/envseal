@@ -34,7 +34,9 @@ run_case() {
 run_case "blocks a leaked secret value" 2 \
   "$(printf '{"tool_response":{"stdout":"the token is %s here"}}' "$FAKE_API_TOKEN")"
 
-# 2. Name-reference only -> allowed (0).
+# 2. Name-reference only -> allowed (0). The literal '$FAKE_API_TOKEN' is intentional here —
+# we are asserting that a NAME reference (not the value) passes the guard, so it must NOT expand.
+# shellcheck disable=SC2016
 run_case "allows a name reference" 0 \
   '{"tool_response":{"stdout":"using $FAKE_API_TOKEN to authenticate"}}'
 
