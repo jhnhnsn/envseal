@@ -75,8 +75,14 @@ fn load_secrets() -> Result<Vec<(String, String)>, String> {
     let ciphertext = layout::read_store(&paths.store).map_err(|e| e.to_string())?;
 
     let mut text = crypto::decrypt_to_text(&ciphertext, &identity).map_err(|e| e.to_string())?;
-    let vars = crypto::parse_dotenv(&text);
+    let parsed = crypto::parse_dotenv(&text);
     text.zeroize();
+    // Decode any base64-marked (multi-line) values back to their originals.
+    let mut vars = Vec::with_capacity(parsed.len());
+    for (k, v) in parsed {
+        let decoded = crypto::decode_value(&v).map_err(|e| e.to_string())?;
+        vars.push((k, decoded));
+    }
     Ok(vars)
 }
 
@@ -178,7 +184,10 @@ fn cmd_get(args: &[String]) -> i32 {
 /// re-encrypting the store. Reading from stdin keeps the literal value off the command line.
 fn cmd_set(args: &[String]) -> i32 {
     let Some(name) = args.first() else {
-        eprintln!("envseal set: usage: echo -n <value> | envseal set <NAME>");
+        eprintln!(
+            "envseal set: usage: envseal set <NAME>   (then type the value + Enter, \
+             or pipe it: `printf '%s' value | envseal set <NAME>`)"
+        );
         return 2;
     };
     if name.contains('=') || name.trim().is_empty() {
@@ -186,12 +195,23 @@ fn cmd_set(args: &[String]) -> i32 {
         return 2;
     }
 
-    // Read the value from stdin, trimming a single trailing newline (so `echo` works).
+    // Read the value from stdin. Two modes:
+    //   * interactive TTY (you typing): prompt, then read ONE line — finishes on Enter.
+    //   * piped (`printf … | envseal set`): read ALL of stdin, so multi-line values survive.
+    // Either way the value never appears on the command line.
     let mut value = String::new();
-    if io::stdin().read_to_string(&mut value).is_err() {
+    let read = if io::stdin().is_terminal() {
+        eprint!("Enter value for {name} (press Enter to finish): ");
+        let _ = io::stderr().flush();
+        io::stdin().read_line(&mut value)
+    } else {
+        io::stdin().read_to_string(&mut value)
+    };
+    if read.is_err() {
         eprintln!("envseal set: could not read value from stdin.");
         return 1;
     }
+    // Trim a single trailing newline (the Enter keystroke, or a trailing newline from `echo`).
     if value.ends_with('\n') {
         value.pop();
         if value.ends_with('\r') {
@@ -290,14 +310,8 @@ fn write_secrets(recipients_path: &Path, store: &Path, vars: &mut [(String, Stri
         }
     };
 
-    // dotenv is line-based: a value cannot contain a newline. Reject rather than truncate.
-    if vars
-        .iter()
-        .any(|(_, v)| v.contains('\n') || v.contains('\r'))
-    {
-        eprintln!("envseal: secret values cannot contain newlines.");
-        return 1;
-    }
+    // Multi-line values are stored base64-encoded (see crypto::encode_value), so the dotenv
+    // store stays one line per key. render_dotenv applies the encoding.
     let mut payload = render_dotenv(vars);
 
     let result = crypto::encrypt(payload.as_bytes(), &recips);
@@ -839,15 +853,17 @@ fn starts_and_ends_with_matching_quote(v: &str) -> bool {
 fn render_dotenv(vars: &[(String, String)]) -> String {
     let mut payload = String::new();
     for (k, v) in vars {
+        // Encode multi-line values (base64 behind a marker); single-line values pass through.
+        let encoded = crypto::encode_value(v);
         payload.push_str(k);
         payload.push('=');
-        if starts_and_ends_with_matching_quote(v) {
-            let q = if v.starts_with('"') { '\'' } else { '"' };
+        if starts_and_ends_with_matching_quote(&encoded) {
+            let q = if encoded.starts_with('"') { '\'' } else { '"' };
             payload.push(q);
-            payload.push_str(v);
+            payload.push_str(&encoded);
             payload.push(q);
         } else {
-            payload.push_str(v);
+            payload.push_str(&encoded);
         }
         payload.push('\n');
     }

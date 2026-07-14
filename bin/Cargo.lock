@@ -266,6 +266,7 @@ name = "envseal"
 version = "0.1.0"
 dependencies = [
  "age",
+ "base64",
  "zeroize",
 ]
 

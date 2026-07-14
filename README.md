@@ -58,10 +58,14 @@ list, and an empty store. Idempotent.
 ### 2. Add and list secrets
 
 ```bash
-printf 'sk-proj-abc123' | envseal set OPENAI_API_KEY   # value from stdin, not the command line
+envseal set OPENAI_API_KEY                             # prompts; type the value + Enter
+printf 'sk-proj-abc123' | envseal set OPENAI_API_KEY   # …or pipe it (off the command line)
 envseal edit                                           # …or edit them all in $EDITOR
 envseal list                                           # names only, never values
 ```
+
+`set` stores **single-line** values (API keys, tokens, passwords). Values with newlines are
+rejected — see [Multi-line secrets](#multi-line-secrets) below.
 
 ### 3. Run something that needs secrets
 
@@ -149,6 +153,21 @@ envseal unlock -- cmd /c "psql %DATABASE_URL% -f migrate.sql"
 # Start an unlocked subshell (cmd.exe by default via %COMSPEC%):
 envseal unlock
 ```
+
+### Multi-line secrets
+
+`set` handles multi-line values (PEM keys, TLS certs, service-account JSON) — **pipe them in**,
+since a multi-line value can't be typed at the single-line interactive prompt:
+
+```bash
+envseal set TLS_KEY   < privkey.pem
+envseal set GCP_CREDS < service-account.json
+```
+
+Under the hood, multi-line values are base64-encoded inside the store (so the on-disk dotenv
+stays one line per key); `unlock`/`get` decode them transparently, so the env var your program
+sees is the exact original. Single-line secrets are stored as-is. Pasting a multi-line value
+into the interactive prompt won't work — pipe it or use `envseal edit`.
 
 ---
 

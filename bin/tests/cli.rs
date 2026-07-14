@@ -203,6 +203,32 @@ fn pubkey_prints_the_public_key_matching_recipients() {
 }
 
 #[test]
+fn multiline_value_roundtrips() {
+    let repo = Repo::new("multiline");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+
+    // A multi-line secret (like a PEM key) piped into `set`.
+    let pem = "-----BEGIN KEY-----\nline1\nline2\n-----END KEY-----";
+    assert_eq!(
+        repo.run(&["set", "TLS_KEY"], pem).code,
+        0,
+        "set multi-line failed"
+    );
+
+    // It must come back byte-for-byte through unlock. Write it to a file and compare, so no
+    // value is echoed; base64 the file contents for an exact, newline-safe comparison.
+    let script = "printf '%s' \"$TLS_KEY\" | base64 | tr -d '\\n'";
+    let out = repo.run(&["unlock", "--", "sh", "-c", script], "");
+    let got_b64 = out.stdout.trim();
+    use base64::Engine;
+    let expected_b64 = base64::engine::general_purpose::STANDARD.encode(pem.as_bytes());
+    assert_eq!(
+        got_b64, expected_b64,
+        "multi-line value did not round-trip exactly"
+    );
+}
+
+#[test]
 fn set_list_and_unlock_roundtrip() {
     let repo = Repo::new("roundtrip");
     assert_eq!(repo.run(&["init"], "").code, 0);

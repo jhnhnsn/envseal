@@ -131,6 +131,41 @@ pub fn decrypt_to_text(
     String::from_utf8(bytes).map_err(|_| CryptoError::NotUtf8)
 }
 
+/// Sentinel marking a value stored base64-encoded (used for values that contain newlines,
+/// which the line-based dotenv store can't hold verbatim). Chosen to be extremely unlikely to
+/// collide with a real single-line secret prefix.
+const B64_MARKER: &str = "!envseal:b64!";
+
+/// Encode a value for on-disk storage. Single-line values are stored verbatim (readable in a
+/// `git diff`); values containing a newline are base64-encoded behind [`B64_MARKER`] so the
+/// dotenv store stays strictly one line per key.
+pub fn encode_value(value: &str) -> String {
+    if value.contains('\n') || value.contains('\r') {
+        use base64::Engine;
+        format!(
+            "{B64_MARKER}{}",
+            base64::engine::general_purpose::STANDARD.encode(value.as_bytes())
+        )
+    } else {
+        value.to_string()
+    }
+}
+
+/// Reverse [`encode_value`]: decode a marked base64 value back to its original bytes; pass any
+/// other value through unchanged (so raw values from older stores are untouched).
+pub fn decode_value(stored: &str) -> Result<String, CryptoError> {
+    match stored.strip_prefix(B64_MARKER) {
+        Some(b64) => {
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(b64.as_bytes())
+                .map_err(|_| CryptoError::NotUtf8)?;
+            String::from_utf8(bytes).map_err(|_| CryptoError::NotUtf8)
+        }
+        None => Ok(stored.to_string()),
+    }
+}
+
 /// Parse dotenv `KEY=value` text into ordered pairs.
 ///
 /// Rules (kept deliberately simple and predictable):
@@ -254,6 +289,39 @@ mod tests {
     }
 
     // --- dotenv parsing (ported, unchanged semantics) ---
+
+    #[test]
+    fn encode_decode_roundtrips_singleline_and_multiline() {
+        // Single-line values are stored verbatim (readable in git diff).
+        assert_eq!(encode_value("sk-abc123"), "sk-abc123");
+        assert_eq!(decode_value("sk-abc123").unwrap(), "sk-abc123");
+
+        // Multi-line values are marked + base64-encoded, and decode back exactly.
+        let pem = "-----BEGIN KEY-----\nline1\nline2\n-----END KEY-----";
+        let enc = encode_value(pem);
+        assert!(enc.starts_with(B64_MARKER), "multi-line must be marked");
+        assert!(!enc.contains('\n'), "encoded form must be single-line");
+        assert_eq!(decode_value(&enc).unwrap(), pem);
+    }
+
+    #[test]
+    fn decode_passes_through_unmarked_values() {
+        // Backward-compat: values from older stores (no marker) are returned unchanged,
+        // even if they happen to contain base64-looking text.
+        assert_eq!(decode_value("YWJjMTIz").unwrap(), "YWJjMTIz");
+        assert_eq!(
+            decode_value("plain value with spaces").unwrap(),
+            "plain value with spaces"
+        );
+    }
+
+    #[test]
+    fn crlf_value_is_also_encoded() {
+        let v = "a\r\nb";
+        let enc = encode_value(v);
+        assert!(enc.starts_with(B64_MARKER));
+        assert_eq!(decode_value(&enc).unwrap(), v);
+    }
 
     #[test]
     fn dotenv_simple_pairs() {
