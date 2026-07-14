@@ -21,6 +21,7 @@ command line.
 recipients                        # age PUBLIC keys, committed. Who can decrypt.
 secrets/secrets.enc               # age-encrypted KEY=value store, committed.
 ~/.config/envseal/identity.txt    # YOUR age private key. Never committed. (0600)
+                                  #   Windows: %APPDATA%\envseal\identity.txt
 ```
 
 To *use* a secret you unlock it into a **child process**. The child gets the value in its
@@ -129,6 +130,25 @@ Point `$ENVSEAL_IDENTITY` at a dedicated CI key (added as a recipient, stored as
 
 ```bash
 ENVSEAL_IDENTITY=/path/to/ci-key envseal unlock -- npm run deploy
+```
+
+### On Windows
+
+Most commands are identical — `envseal init`, `list`, `pubkey`, `add-recipient`, and
+`envseal unlock -- <program>` all work as-is. Only a few things differ:
+
+```powershell
+# Your identity lives at %APPDATA%\envseal\identity.txt; `edit` opens Notepad.
+'sk-proj-abc123' | envseal set OPENAI_API_KEY     # PowerShell pipes a value to stdin
+envseal unlock -- npm run build                   # runs the program directly — same as POSIX
+
+# The only real difference: no `sh -c`. To reference a value by name in a shell,
+# use PowerShell (%VAR% for cmd.exe):
+envseal unlock -- powershell -c 'psql $env:DATABASE_URL -f migrate.sql'
+envseal unlock -- cmd /c "psql %DATABASE_URL% -f migrate.sql"
+
+# Start an unlocked subshell (cmd.exe by default via %COMSPEC%):
+envseal unlock
 ```
 
 ---

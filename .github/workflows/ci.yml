@@ -30,6 +30,29 @@ jobs:
       - name: build (release)
         run: cargo build --release
 
+      # Verify the Windows examples in the README actually work: a PowerShell pipe into
+      # `set`, then `unlock -- <cmd>` reads the value back. Guards against PowerShell's
+      # stdin/newline quirks silently corrupting a stored secret.
+      - name: windows smoke (powershell examples)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: bin
+        run: |
+          $env:ENVSEAL_IDENTITY = Join-Path $env:RUNNER_TEMP 'envseal-id.txt'
+          $bin = '.\target\release\envseal.exe'
+          & $bin init
+          if ($LASTEXITCODE -ne 0) { throw 'init failed' }
+          'sk-windows-CI-value' | & $bin set OPENAI_API_KEY
+          if ($LASTEXITCODE -ne 0) { throw 'set failed' }
+          # Read it back through the child and assert an exact round-trip.
+          & $bin unlock -- powershell -Command 'if ($env:OPENAI_API_KEY -eq \"sk-windows-CI-value\") { \"OK\" } else { throw \"round-trip mismatch: [$env:OPENAI_API_KEY]\" }'
+          if ($LASTEXITCODE -ne 0) { throw 'unlock round-trip failed' }
+          # get under a forced-agent env must NOT reveal the value.
+          $env:ENVSEAL_AGENT = '1'
+          $masked = & $bin get OPENAI_API_KEY
+          if ($masked -match 'sk-windows-CI-value') { throw 'get leaked the value under an agent' }
+          Write-Host 'windows smoke: OK'
+
   guardrails:
     name: guardrails (bash)
     runs-on: ubuntu-latest
