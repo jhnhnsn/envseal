@@ -201,6 +201,41 @@ fn init_creates_identity_recipients_and_store() {
 }
 
 #[test]
+fn init_installs_agent_skill_into_the_repo() {
+    let repo = Repo::new("initskill");
+    // Non-TTY (piped) init installs the skill without prompting.
+    let out = repo.run(&["init"], "");
+    assert_eq!(out.code, 0, "init failed: {}", out.stderr);
+
+    let skill = repo.dir.join(".claude/skills/envseal/SKILL.md");
+    assert!(
+        skill.is_file(),
+        "init should write the agent skill into the repo"
+    );
+    let content = std::fs::read_to_string(&skill).unwrap();
+    assert!(
+        content.contains("name: envseal"),
+        "skill has valid frontmatter"
+    );
+    assert!(
+        out.stderr.contains("agent skill"),
+        "init should announce the skill install: {}",
+        out.stderr
+    );
+}
+
+#[test]
+fn init_no_skill_flag_skips_the_skill() {
+    let repo = Repo::new("noskill");
+    let out = repo.run(&["init", "--no-skill"], "");
+    assert_eq!(out.code, 0, "init --no-skill failed: {}", out.stderr);
+    assert!(
+        !repo.dir.join(".claude/skills/envseal/SKILL.md").exists(),
+        "--no-skill must not write the skill"
+    );
+}
+
+#[test]
 fn version_flag_prints_crate_version() {
     let repo = Repo::new("version");
     let expected = format!("envseal {}", env!("CARGO_PKG_VERSION"));

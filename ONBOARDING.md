@@ -94,8 +94,14 @@ From inside the project:
 ```bash
 cd ~/path/to/the-project        # ← be in the repo; envseal acts on THIS repo's store
 envseal init                    # generates your private key (once) + your recipients entry here
+                                #   also offers [Y/n] to add the Claude Code agent skill to the repo
 envseal pubkey                  # prints your PUBLIC key (age1...) — safe to share
 ```
+
+`init` offers to drop the agent skill into `.claude/skills/envseal/` — say yes, then commit it,
+and every teammate who clones gets it (their agent learns to use secrets safely). `--no-skill`
+skips. For the full guardrails (denylist + output-guard hook), see
+[GUARDRAILS.md](./GUARDRAILS.md).
 
 Send that `age1...` public key to a current member (Slack, email, or — best — open a PR that
 adds it to the `recipients` file). Your **private** key stays in `~/.config/envseal/` and is
@@ -139,9 +145,9 @@ See the [README](./README.md) for the full command list.
 
 ## Hardening your repo for AI agents
 
-Installing envseal doesn't harden the repo by itself. To steer (and mechanically block) an agent
-from exposing a secret value, follow **[GUARDRAILS.md](./GUARDRAILS.md)** — it sets up agent
-instructions, a command denylist, and an output-guard hook, for Claude Code, Cursor, and others.
+`envseal init` already offers to add the **agent skill** (Layer 1 — instructions). For the full
+defense — a **command denylist** and an **output-guard hook** that mechanically blocks a leaked
+value — follow **[GUARDRAILS.md](./GUARDRAILS.md)**, which covers Claude Code, Cursor, and others.
 
 Tip: you can point your agent at that file's URL —
 `https://github.com/jhnhnsn/envseal/blob/main/GUARDRAILS.md` — and ask it to apply the

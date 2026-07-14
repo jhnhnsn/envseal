@@ -42,19 +42,20 @@ Minimum text to include (adapt wording to the file):
 - If you think you need a plaintext value, STOP and ask the human.
 ```
 
-For Claude Code, a ready-made skill lives in this repo at
-[`agent/envseal-skill.md`](./agent/envseal-skill.md). Install it **globally** (so it loads in
-every repo you work in) or **per-project**:
+For Claude Code, **`envseal init` already offers to install the skill** into this repo's
+`.claude/skills/envseal/` — commit it and it travels to teammates on clone. To (re)install it
+manually, or install it globally so it loads in every repo you work in:
 
 ```bash
-# Global (recommended — available in all your repos):
+# Per-project (what `init` does; travels to teammates):
+mkdir -p .claude/skills/envseal
+curl -fsSL https://raw.githubusercontent.com/jhnhnsn/envseal/main/agent/envseal-skill.md \
+  -o .claude/skills/envseal/SKILL.md
+
+# …or global (available in all YOUR repos; doesn't travel to teammates):
 mkdir -p ~/.claude/skills/envseal
 curl -fsSL https://raw.githubusercontent.com/jhnhnsn/envseal/main/agent/envseal-skill.md \
   -o ~/.claude/skills/envseal/SKILL.md
-
-# …or per-project (travels to teammates who clone this repo):
-mkdir -p .claude/skills/envseal
-cp <path-to>/agent/envseal-skill.md .claude/skills/envseal/SKILL.md
 ```
 
 Restart Claude Code afterward — skills load at startup.

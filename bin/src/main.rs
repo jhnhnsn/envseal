@@ -613,7 +613,10 @@ fn default_shell() -> (OsString, Vec<OsString>) {
 
 /// `envseal init` — generate an age identity (if none), create the `recipients` file with the
 /// user as sole recipient (if none), and create an empty encrypted store (if none). Idempotent.
-fn cmd_init(_args: &[String]) -> i32 {
+/// Also offers to add the Claude Code agent skill to this repo (`--no-skill` to skip).
+fn cmd_init(args: &[String]) -> i32 {
+    let skip_skill = args.iter().any(|a| a == "--no-skill");
+
     // 1. Identity: reuse an existing one, else generate and write it.
     let public = match layout::read_identity_secret() {
         Ok(secret) => match crypto::public_from_secret(&secret) {
@@ -706,9 +709,66 @@ fn cmd_init(_args: &[String]) -> i32 {
         }
     }
 
+    // 4. Offer to add the Claude Code agent skill to THIS repo (so it commits + travels to
+    //    teammates). Prompts [Y/n]; --no-skill skips; non-interactive defaults to yes.
+    if !skip_skill {
+        let repo_root = recipients_path.parent().unwrap_or(Path::new("."));
+        maybe_install_skill(repo_root);
+    }
+
     eprintln!("\n🔓 Ready. Add secrets by editing the store, then `envseal unlock`.");
     eprintln!("   Share your public key with collaborators so they can add you.");
     0
+}
+
+/// The agent skill content, embedded at compile time so the binary can write it into any repo
+/// (a consuming repo has no copy of the source file). Kept in sync with `agent/envseal-skill.md`.
+const AGENT_SKILL: &str = include_str!("../../agent/envseal-skill.md");
+
+/// Offer to write the Claude Code agent skill into `<repo>/.claude/skills/envseal/SKILL.md`.
+/// Prompts `[Y/n]` on a TTY (default yes); on a non-TTY (CI) it installs without prompting.
+/// Writing it into the repo means it gets committed and travels to teammates who clone.
+fn maybe_install_skill(repo_root: &Path) {
+    let dest = repo_root
+        .join(".claude")
+        .join("skills")
+        .join("envseal")
+        .join("SKILL.md");
+
+    let existed = dest.is_file();
+    let prompt = if existed {
+        "Update the Claude Code agent skill in this repo? [Y/n] "
+    } else {
+        "Add the Claude Code agent skill to this repo (so your agent uses secrets safely)? [Y/n] "
+    };
+
+    if io::stdin().is_terminal() {
+        eprint!("{prompt}");
+        let _ = io::stderr().flush();
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_ok() {
+            let ans = input.trim().to_ascii_lowercase();
+            if ans == "n" || ans == "no" {
+                eprintln!("   skipped. (Install later: see GUARDRAILS.md)");
+                return;
+            }
+        }
+    }
+
+    if let Some(parent) = dest.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("envseal: could not create {}: {e}", parent.display());
+            return;
+        }
+    }
+    match std::fs::write(&dest, AGENT_SKILL) {
+        Ok(()) => {
+            let verb = if existed { "updated" } else { "added" };
+            eprintln!("✔  {verb} agent skill at {}", dest.display());
+            eprintln!("   commit `.claude/skills/envseal/` so teammates get it on clone.");
+        }
+        Err(e) => eprintln!("envseal: could not write agent skill: {e}"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -943,7 +1003,7 @@ fn print_help() {
          \x20 envseal list                     List secret NAMES (never values).\n\
          \x20 envseal pubkey                   Print your age PUBLIC key (share it to be added).\n\
          \x20 envseal unlock [-- <cmd>...]     Subshell / run a command with the whole env set.\n\
-         \x20 envseal init                     Create identity + recipients + empty store.\n\
+         \x20 envseal init [--no-skill]        Create identity + recipients + store; add agent skill.\n\
          \x20 envseal add-recipient <age1..>   Add a collaborator and re-encrypt.\n\
          \x20 envseal remove-recipient <k|nm>  Remove a collaborator and re-encrypt (then rotate).\n\
          \x20 envseal reencrypt                Re-encrypt the store to the current recipients.\n\
