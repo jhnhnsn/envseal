@@ -1,5 +1,9 @@
 # Never commit plaintext secrets or private keys.
-# The ONLY secrets file that belongs in git is secrets/secrets.enc (age-encrypted).
+# This is the envseal tool's OWN repo — it does not carry a real secret store. If you dogfood
+# envseal here (`envseal init`), the generated store/recipients are ignored so they aren't
+# committed. (In a normal project that USES envseal, you DO commit recipients + secrets.enc.)
+/recipients
+/secrets/
 
 # Decrypted / plaintext env files
 *.dec.env
