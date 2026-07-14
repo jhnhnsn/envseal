@@ -83,8 +83,9 @@ envseal edit                                           # …or edit them all in 
 envseal list                                           # names only, never values
 ```
 
-`set` stores **single-line** values (API keys, tokens, passwords). Values with newlines are
-rejected — see [Multi-line secrets](#multi-line-secrets) below.
+The bare interactive prompt reads a **single line** (API keys, tokens, passwords). Multi-line
+values (PEM keys, certs, JSON) work too — just **pipe** them rather than typing at the prompt;
+see [Multi-line secrets](#multi-line-secrets) below.
 
 ### 3. Run something that needs secrets
 
