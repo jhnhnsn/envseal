@@ -6,12 +6,7 @@ up is three steps. Your AI agent (Claude Code, etc.) already knows how to use en
 
 ## 1. Install envseal (once per machine)
 
-A prebuilt binary — no toolchain required. Pick the level of caution you want; **all four give
-the same result.** The installer verifies the downloaded binary's SHA-256 before installing, and
-enforces HTTPS/TLS 1.2, so the *binary* is checksum-protected either way. The choice below is
-about whether you also inspect the *installer script* before running it.
-
-**Quickest** — pipe straight to a shell (trusts the script on first use):
+A prebuilt binary — no toolchain required. Copy one line:
 
 ```bash
 # macOS / Linux
@@ -22,14 +17,14 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/release
 powershell -c "irm https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.ps1 | iex"
 ```
 
-To install somewhere other than `~/.local/bin`, set `ENVSEAL_INSTALL_DIR` first — e.g. a dir
-already on your PATH:
+<details>
+<summary>Security-conscious install options (inspect the script, verify checksums, custom path)</summary>
 
-```bash
-ENVSEAL_INSTALL_DIR="$HOME/bin" curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.sh | sh
-```
+The installer always verifies the downloaded binary's SHA-256 and enforces HTTPS/TLS 1.2, so the
+*binary* is checksum-protected no matter which option you use. These options additionally let you
+vet the *installer script* first, or choose where it installs. **All give the same result.**
 
-**Safer** — download, read it, then run it:
+**Inspect first** — download, read it, then run it:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.sh -o envseal-installer.sh
@@ -37,8 +32,7 @@ less envseal-installer.sh          # inspect — it's plain, readable shell
 sh envseal-installer.sh
 ```
 
-**Most cautious** — use the GitHub CLI (verifies via your authenticated `gh`), or grab the
-binary and its checksum yourself:
+**Via authenticated `gh`, or verify the checksum by hand:**
 
 ```bash
 gh release download v0.1.1 --repo jhnhnsn/envseal --pattern '*installer.sh' -O envseal-installer.sh
@@ -47,6 +41,13 @@ sh envseal-installer.sh
 gh release download v0.1.1 --repo jhnhnsn/envseal --pattern '*apple-darwin*'
 shasum -a 256 -c envseal-*.tar.xz.sha256      # must print "OK"
 ```
+
+**Custom install location** — set `ENVSEAL_INSTALL_DIR` (e.g. a dir already on your PATH):
+
+```bash
+ENVSEAL_INSTALL_DIR="$HOME/bin" curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.sh | sh
+```
+</details>
 
 Installs to `~/.local/bin` and adds it to your PATH — **for new shells.** Your *current*
 terminal won't see it yet, so **open a new terminal** (or run `source ~/.local/bin/env`) before
