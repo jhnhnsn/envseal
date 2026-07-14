@@ -31,8 +31,8 @@ jobs:
         run: cargo build --release
 
       # Verify the Windows examples in the README actually work: a PowerShell pipe into
-      # `set`, then `unlock -- <cmd>` reads the value back. Guards against PowerShell's
-      # stdin/newline quirks silently corrupting a stored secret.
+      # `set`, then read the value back. Guards against PowerShell stdin/newline quirks
+      # silently corrupting a stored secret, and confirms the agent-mask fires on Windows.
       - name: windows smoke (powershell examples)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -40,17 +40,23 @@ jobs:
         run: |
           $env:ENVSEAL_IDENTITY = Join-Path $env:RUNNER_TEMP 'envseal-id.txt'
           $bin = '.\target\release\envseal.exe'
+          $expected = 'sk-windows-CI-value'
+
           & $bin init
           if ($LASTEXITCODE -ne 0) { throw 'init failed' }
-          'sk-windows-CI-value' | & $bin set OPENAI_API_KEY
+
+          # Pipe a value into `set` (the README's Windows example), then read it back with
+          # `get --show` and assert an exact round-trip — no nested shell, no quoting games.
+          $expected | & $bin set OPENAI_API_KEY
           if ($LASTEXITCODE -ne 0) { throw 'set failed' }
-          # Read it back through the child and assert an exact round-trip.
-          & $bin unlock -- powershell -Command 'if ($env:OPENAI_API_KEY -eq \"sk-windows-CI-value\") { \"OK\" } else { throw \"round-trip mismatch: [$env:OPENAI_API_KEY]\" }'
-          if ($LASTEXITCODE -ne 0) { throw 'unlock round-trip failed' }
-          # get under a forced-agent env must NOT reveal the value.
+          $got = (& $bin get OPENAI_API_KEY --show).Trim()
+          if ($got -ne $expected) { throw "round-trip mismatch: got [$got], expected [$expected]" }
+
+          # Under an agent, `get` must NOT reveal the value.
           $env:ENVSEAL_AGENT = '1'
           $masked = & $bin get OPENAI_API_KEY
-          if ($masked -match 'sk-windows-CI-value') { throw 'get leaked the value under an agent' }
+          if ($masked -match $expected) { throw 'get leaked the value under an agent' }
+
           Write-Host 'windows smoke: OK'
 
   guardrails:
