@@ -25,7 +25,7 @@ envseal unlock -- npm run build
 envseal unlock -- flyctl deploy
 # When a tool needs the value as an argument, reference it by name inside a shell:
 envseal unlock -- sh -c 'psql "$DATABASE_URL" -f migrate.sql'
-envseal unlock -- sh -c 'curl -H "Authorization: Bearer $OPENAI_API_KEY" https://api.example.com'
+envseal unlock -- sh -c 'curl -H "Authorization: Bearer $MY_SUPER_SECRET_KEY" https://api.example.com'
 ```
 
 You write the literal string `$DATABASE_URL` — six inert characters. Never substitute the

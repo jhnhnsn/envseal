@@ -73,12 +73,12 @@ Copy a secret from your password manager, then paste it into `set` — the value
 **stdin**, so it never lands on the command line or in your shell history:
 
 ```bash
-pbpaste | envseal set OPENAI_API_KEY                   # macOS: paste from clipboard
-# Linux (wayland): wl-paste | envseal set OPENAI_API_KEY
-# Linux (X11):     xclip -o  | envseal set OPENAI_API_KEY
+pbpaste | envseal set MY_SUPER_SECRET_KEY                   # macOS: paste from clipboard
+# Linux (wayland): wl-paste | envseal set MY_SUPER_SECRET_KEY
+# Linux (X11):     xclip -o  | envseal set MY_SUPER_SECRET_KEY
 
-envseal set OPENAI_API_KEY                             # …or run bare, then paste + Enter
-printf 'sk-proj-abc123' | envseal set OPENAI_API_KEY   # …or pipe a literal
+envseal set MY_SUPER_SECRET_KEY                             # …or run bare, then paste + Enter
+printf 'sk-proj-abc123' | envseal set MY_SUPER_SECRET_KEY   # …or pipe a literal
 envseal edit                                           # …or edit them all in $EDITOR
 envseal list                                           # names only, never values
 ```
@@ -106,7 +106,7 @@ Start the agent from an unlocked subshell; every command it runs inherits the se
 
 ```bash
 envseal unlock     # subshell with all secrets set; `exit` locks
-claude             # launched inside it — references $OPENAI_API_KEY by name
+claude             # launched inside it — references $MY_SUPER_SECRET_KEY by name
 ```
 
 If the agent tries to read a value directly, it can't — `envseal get` masks under an agent:
@@ -162,7 +162,7 @@ Most commands are identical — `envseal init`, `list`, `pubkey`, `add-recipient
 
 ```powershell
 # Your identity lives at %APPDATA%\envseal\identity.txt; `edit` opens Notepad.
-'sk-proj-abc123' | envseal set OPENAI_API_KEY     # PowerShell pipes a value to stdin
+'sk-proj-abc123' | envseal set MY_SUPER_SECRET_KEY     # PowerShell pipes a value to stdin
 envseal unlock -- npm run build                   # runs the program directly — same as POSIX
 
 # The only real difference: no `sh -c`. To reference a value by name in a shell,
