@@ -38,6 +38,10 @@ cargo install --path bin          # → ~/.cargo/bin/envseal (on your PATH)
 cargo build --release --manifest-path bin/Cargo.toml   # → bin/target/release/envseal
 ```
 
+**Joining a team that already uses envseal?** See **[ONBOARDING.md](./ONBOARDING.md)** — install,
+share your key, get added. An **AI-agent skill is bundled** in `.claude/skills/envseal/`, so
+Claude Code (and compatible agents) automatically know how to use secrets by name in this repo.
+
 ---
 
 ## Usage scenarios
