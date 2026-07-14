@@ -183,6 +183,18 @@ fn init_creates_identity_recipients_and_store() {
 }
 
 #[test]
+fn version_flag_prints_crate_version() {
+    let repo = Repo::new("version");
+    let expected = format!("envseal {}", env!("CARGO_PKG_VERSION"));
+    // All three spellings work and print the same thing, without needing a repo/identity.
+    for form in ["--version", "-V", "version"] {
+        let out = repo.run(&[form], "");
+        assert_eq!(out.code, 0, "`{form}` should exit 0: {}", out.stderr);
+        assert_eq!(out.stdout.trim(), expected, "`{form}` output");
+    }
+}
+
+#[test]
 fn pubkey_prints_the_public_key_matching_recipients() {
     let repo = Repo::new("pubkey");
     assert_eq!(repo.run(&["init"], "").code, 0);

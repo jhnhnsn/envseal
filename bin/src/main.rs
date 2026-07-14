@@ -10,6 +10,7 @@
 //!   envseal add-recipient <age1..>  Add a recipient and re-encrypt the store.
 //!   envseal remove-recipient <k|nm> Remove a recipient and re-encrypt (then rotate!).
 //!   envseal reencrypt               Re-encrypt the store to the current recipients file.
+//!   envseal --version               Print the version.
 //!   envseal -h | --help
 //!
 //! Design notes:
@@ -37,6 +38,10 @@ fn main() {
     let code = match args.first().map(String::as_str) {
         Some("-h") | Some("--help") => {
             print_help();
+            0
+        }
+        Some("-V") | Some("--version") | Some("version") => {
+            println!("envseal {}", env!("CARGO_PKG_VERSION"));
             0
         }
         None => {
@@ -897,6 +902,7 @@ fn print_help() {
          \x20 envseal add-recipient <age1..>   Add a collaborator and re-encrypt.\n\
          \x20 envseal remove-recipient <k|nm>  Remove a collaborator and re-encrypt (then rotate).\n\
          \x20 envseal reencrypt                Re-encrypt the store to the current recipients.\n\
+         \x20 envseal --version                Print the envseal version.\n\
          \n\
          EXAMPLES:\n\
          \x20 do-thing \"$(envseal get DB_PASSWORD)\"   # by name; masked if an agent runs it bare\n\
