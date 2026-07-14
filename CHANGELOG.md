@@ -2,6 +2,15 @@
 
 All notable changes to envseal are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.4
+
+### Added
+- **`envseal init` offers to install the Claude Code agent skill** into the current repo's
+  `.claude/skills/envseal/` (prompts `[Y/n]`, default yes; `--no-skill` to skip). Committing it
+  means every teammate who clones the repo gets it — their agent learns to use secrets by name
+  and never print a value. The skill is embedded in the binary, so no separate download is
+  needed. Non-interactive runs (CI) install it without prompting.
+
 ## 0.1.3
 
 ### Changed
