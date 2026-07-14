@@ -105,6 +105,21 @@ fn mask(value: &str) -> String {
     "••••••••".to_string()
 }
 
+/// A masked preview for confirming a freshly-set value: the first few characters followed by a
+/// fixed run of dots — enough to recognize a paste, without showing the secret or its length.
+/// Short values (≤5 chars) are fully masked so a whole short secret is never revealed.
+fn masked_preview(value: &str) -> String {
+    const SHOWN: usize = 5;
+    const DOTS: &str = "••••••••";
+    // Count by chars (not bytes) so multibyte values aren't split mid-codepoint.
+    let char_count = value.chars().count();
+    if char_count <= SHOWN {
+        return DOTS.to_string();
+    }
+    let head: String = value.chars().take(SHOWN).collect();
+    format!("{head}{DOTS}")
+}
+
 // ---------------------------------------------------------------------------
 // get
 // ---------------------------------------------------------------------------
@@ -242,6 +257,15 @@ fn cmd_set(args: &[String]) -> i32 {
     };
 
     // Upsert.
+    // Compute a masked preview (first few chars + asterisks) so a HUMAN can sanity-check the
+    // paste. Under an agent, even the first few chars shouldn't reach the transcript, so mask
+    // fully. Preview never holds more than the first 5 chars of the value.
+    let preview = if under_agent() {
+        mask(&value)
+    } else {
+        masked_preview(&value)
+    };
+
     match vars.iter_mut().find(|(k, _)| k == name) {
         Some((_, v)) => {
             v.zeroize();
@@ -253,7 +277,7 @@ fn cmd_set(args: &[String]) -> i32 {
 
     let code = write_secrets(&paths.recipients, &paths.store, &mut vars);
     if code == 0 {
-        eprintln!("✔  set {name}");
+        eprintln!("✔  set {name} ({preview})");
     }
     code
 }
@@ -923,6 +947,34 @@ mod tests {
     fn mask_hides_value_and_length() {
         assert_eq!(mask("short"), mask("a-much-longer-secret-value"));
         assert!(!mask("sk-abc123").contains("sk-"));
+    }
+
+    #[test]
+    fn masked_preview_shows_first_five_then_dots() {
+        let p = masked_preview("sk-proj-abc123def456");
+        assert!(p.starts_with("sk-pr"), "should show first 5 chars: {p}");
+        assert!(!p.contains("abc123"), "must not reveal the rest: {p}");
+        assert!(p.contains('•'), "should be masked after the prefix");
+    }
+
+    #[test]
+    fn masked_preview_fully_masks_short_values() {
+        // ≤5 chars: never reveal any of a short secret.
+        for v in ["", "a", "abcd", "exact"] {
+            assert!(
+                !masked_preview(v).chars().any(|c| c != '•'),
+                "short value {v:?} should be all dots, got {}",
+                masked_preview(v)
+            );
+        }
+    }
+
+    #[test]
+    fn masked_preview_counts_chars_not_bytes() {
+        // Multibyte: 5 CHARS shown, no split codepoint (would panic if byte-sliced).
+        let p = masked_preview("café☕secret-tail");
+        assert!(p.starts_with("café☕"), "5 chars incl. multibyte: {p}");
+        assert!(!p.contains("secret"), "rest hidden: {p}");
     }
 
     #[test]

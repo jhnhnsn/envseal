@@ -76,12 +76,17 @@ Copy a secret from your password manager, then paste it into `set` — the value
 pbpaste | envseal set MY_SUPER_SECRET_KEY                   # macOS: paste from clipboard
 # Linux (wayland): wl-paste | envseal set MY_SUPER_SECRET_KEY
 # Linux (X11):     xclip -o  | envseal set MY_SUPER_SECRET_KEY
+#   → ✔  set MY_SUPER_SECRET_KEY (sk-pr••••••••)   ← masked confirmation of what you stored
 
 envseal set MY_SUPER_SECRET_KEY                             # …or run bare, then paste + Enter
 printf 'sk-proj-abc123' | envseal set MY_SUPER_SECRET_KEY   # …or pipe a literal
 envseal edit                                           # …or edit them all in $EDITOR
 envseal list                                           # names only, never values
 ```
+
+`set` confirms with a **masked preview** — the first 5 characters then dots (or all dots for
+short values) — so you can sanity-check the paste without the full value on screen. Under an AI
+agent the preview is fully masked.
 
 The bare interactive prompt reads a **single line** (API keys, tokens, passwords). Multi-line
 values (PEM keys, certs, JSON) work too — just **pipe** them rather than typing at the prompt;
