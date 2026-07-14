@@ -228,15 +228,21 @@ value never appears in the agent's tool call or its output.
 `••••••••`), because an agent captures stdout and we can't distinguish "used inside `$(…)`"
 from "run bare into the transcript". A human who needs the value runs `envseal get NAME --show`.
 
-Three defense layers back this up:
-- **`CLAUDE.md`** — instructs the agent to reference by name; never echo/print/log a value.
-- **`.claude/settings.json`** — denies `env`, `printenv`, `echo $*`, `set`, …
-- **`scripts/redact-guard.sh`** — `PostToolUse` hook; blocks any command output containing a
-  live secret value (raw or base64) as accident insurance.
+Three optional defense layers back this up — set them up in **your** repo by following
+**[GUARDRAILS.md](./GUARDRAILS.md)** (Claude Code, Cursor, and other agents covered):
+- **Instructions** — a skill / `CLAUDE.md` / `.cursorrules` / `AGENTS.md` telling the agent to
+  reference by name and never echo/print/log a value.
+- **Denylist** — deny `env`, `printenv`, `echo $*`, `set`, … (Claude Code `settings.json`, or
+  Cursor's `beforeShellExecution` hook).
+- **Output guard** — a post-command hook (`scripts/redact-guard.sh`) that blocks any command
+  output containing a live secret value (raw or base64), regardless of the agent's judgment.
 
 > Defense-in-depth, **not** a vault. It makes accidental exposure very unlikely. A human or
 > agent who deliberately runs `--show` will see the value — that's by design (you own the
 > secret). What it prevents is *pasting* and *accidental* leakage.
+>
+> **Setting up a repo that USES envseal?** The guardrails don't install themselves — follow
+> **[GUARDRAILS.md](./GUARDRAILS.md)**, or point your agent at its URL and ask it to apply them.
 
 ---
 

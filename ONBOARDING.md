@@ -135,6 +135,14 @@ Or start your whole session unlocked:
 envseal unlock                  # subshell with all secrets set; `exit` locks
 ```
 
-See the [README](./README.md) for the full command list. Your agent has the same knowledge via
-the bundled skill — just tell it what you want to deploy or call, and it will reference secrets
-by name.
+See the [README](./README.md) for the full command list.
+
+## Hardening your repo for AI agents
+
+Installing envseal doesn't harden the repo by itself. To steer (and mechanically block) an agent
+from exposing a secret value, follow **[GUARDRAILS.md](./GUARDRAILS.md)** — it sets up agent
+instructions, a command denylist, and an output-guard hook, for Claude Code, Cursor, and others.
+
+Tip: you can point your agent at that file's URL —
+`https://github.com/jhnhnsn/envseal/blob/main/GUARDRAILS.md` — and ask it to apply the
+guardrails for whatever editor you use.
