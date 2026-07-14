@@ -132,6 +132,26 @@ struct Output {
     stderr: String,
 }
 
+/// Write a directly-executable "editor" that appends `NEW=addedvalue` to the file it's given.
+/// A `.bat` on Windows, a `chmod +x` POSIX script elsewhere. Returns its path.
+fn write_fake_editor(dir: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let editor = dir.join("fake_editor.bat");
+        // %~1 is the first arg; append a line. Echo is fine — the file is dotenv text.
+        std::fs::write(&editor, "@echo NEW=addedvalue>>%~1\r\n").unwrap();
+        editor
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let editor = dir.join("fake_editor.sh");
+        std::fs::write(&editor, "#!/bin/sh\nprintf 'NEW=addedvalue\\n' >> \"$1\"\n").unwrap();
+        std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+        editor
+    }
+}
+
 /// Assert the store on disk is age ciphertext, never the given plaintext.
 fn store_is_encrypted(path: &Path, plaintext_needle: &str) {
     let bytes = std::fs::read(path).expect("read store");
@@ -258,14 +278,9 @@ fn edit_updates_the_store() {
     assert_eq!(repo.run(&["init"], "").code, 0);
     assert_eq!(repo.run(&["set", "EXISTING"], "keepme").code, 0);
 
-    // A fake editor that appends a new secret line to the file it's given.
-    let editor = repo.dir.join("fake_editor.sh");
-    std::fs::write(&editor, "#!/bin/sh\nprintf 'NEW=addedvalue\\n' >> \"$1\"\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    // A fake editor that appends a new secret line to the file it's given. Written per-OS so
+    // it's directly executable: a .bat on Windows, a chmod +x shell script elsewhere.
+    let editor = write_fake_editor(&repo.dir);
 
     let out = repo.run_env(&["edit"], "", "EDITOR", editor.to_str().unwrap());
     assert_eq!(out.code, 0, "edit failed: {}", out.stderr);
