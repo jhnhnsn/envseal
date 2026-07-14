@@ -6,7 +6,12 @@ up is three steps. Your AI agent (Claude Code, etc.) already knows how to use en
 
 ## 1. Install envseal (once per machine)
 
-One line — downloads a prebuilt binary, no toolchain required:
+A prebuilt binary — no toolchain required. Pick the level of caution you want; **all four give
+the same result.** The installer verifies the downloaded binary's SHA-256 before installing, and
+enforces HTTPS/TLS 1.2, so the *binary* is checksum-protected either way. The choice below is
+about whether you also inspect the *installer script* before running it.
+
+**Quickest** — pipe straight to a shell (trusts the script on first use):
 
 ```bash
 # macOS / Linux
@@ -17,8 +22,27 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/release
 powershell -c "irm https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.ps1 | iex"
 ```
 
+**Safer** — download, read it, then run it:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.sh -o envseal-installer.sh
+less envseal-installer.sh          # inspect — it's plain, readable shell
+sh envseal-installer.sh
+```
+
+**Most cautious** — use the GitHub CLI (verifies via your authenticated `gh`), or grab the
+binary and its checksum yourself:
+
+```bash
+gh release download v0.1.0 --repo jhnhnsn/envseal --pattern '*installer.sh' -O envseal-installer.sh
+sh envseal-installer.sh
+#   …or download your platform's archive + its .sha256 and verify by hand:
+gh release download v0.1.0 --repo jhnhnsn/envseal --pattern '*apple-darwin*'
+shasum -a 256 -c envseal-*.tar.xz.sha256      # must print "OK"
+```
+
 Installs to `~/.local/bin` and adds it to your PATH. Restart your shell (or `source ~/.profile`)
-if `envseal` isn't found. Prefer to inspect first? Download the `.sh` and read it before running.
+if `envseal` isn't found.
 
 <details>
 <summary>Build from source instead (needs <a href="https://rustup.rs">Rust</a>)</summary>
