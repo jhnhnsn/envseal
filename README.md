@@ -214,7 +214,31 @@ into the interactive prompt won't work — pipe it or use `envseal edit`.
 
 **Environment:** `ENVSEAL_IDENTITY` overrides the identity path (default
 `~/.config/envseal/identity.txt`). `ENVSEAL_AGENT=1` forces agent-masking for `get` in tools
-that aren't auto-detected.
+that aren't auto-detected. Inside an `envseal unlock` subshell, `ENVSEAL_UNLOCKED=1` is set —
+use it to show an "unlocked" indicator in your prompt (below).
+
+### Show unlock state in your prompt
+
+`envseal unlock` sets `ENVSEAL_UNLOCKED=1` in the subshell it spawns, so you can tell at a glance
+when secrets are live in your shell (and it disappears when you `exit`).
+
+**Starship** (`~/.config/starship.toml`) — add the module to your `format` and define it:
+
+```toml
+format = "${env_var.ENVSEAL_UNLOCKED}$directory$character"   # …plus your other modules
+
+[env_var.ENVSEAL_UNLOCKED]
+variable = "ENVSEAL_UNLOCKED"
+format = "[🔓 envseal]($style) "
+style = "bold yellow"
+```
+
+**Plain bash/zsh** (`~/.bashrc` / `~/.zshrc`):
+
+```bash
+[[ -n "$ENVSEAL_UNLOCKED" ]] && PS1="🔓 $PS1"     # bash
+[[ -n "$ENVSEAL_UNLOCKED" ]] && PROMPT="🔓 $PROMPT" # zsh
+```
 
 ---
 
