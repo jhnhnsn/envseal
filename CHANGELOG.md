@@ -2,6 +2,20 @@
 
 All notable changes to envseal are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.3
+
+### Changed
+- **`get` now masks under any recognized AI agent, not just Claude Code.** Detection was
+  broadened to Cursor (`CURSOR_TRACE_ID`/`CURSOR_AGENT`), Aider (`AIDER_*`), Windsurf, and
+  generic `AI_AGENT`/`AGENT` markers, alongside the existing `ENVSEAL_AGENT=1` opt-in. Human
+  `$(envseal get X)` scripting (no agent markers) still reveals as before.
+
+### Documentation
+- Added **[GUARDRAILS.md](GUARDRAILS.md)** — manual setup for the three agent-safety layers
+  (instructions, command denylist, output-guard hook), with Claude Code as the worked example
+  and the pattern generalized to Cursor, Aider, and Windsurf. A human or an agent can fetch it
+  by URL and apply the guardrails for whatever editor is in use.
+
 ## 0.1.2
 
 ### Added
