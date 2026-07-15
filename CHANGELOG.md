@@ -2,7 +2,7 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
-## Unreleased
+## 0.1.6
 
 ### Changed (breaking — re-run `envstow init`)
 - **New on-disk layout: everything lives under `.envstow/`.** Recipients moved to
