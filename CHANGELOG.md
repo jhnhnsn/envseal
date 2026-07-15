@@ -2,6 +2,17 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## Unreleased
+
+### Added
+- **Profiles.** A repo can hold multiple secret sets (e.g. `dev`/`staging`/`prod`) as separate
+  encrypted stores (`secrets/<profile>.enc`), all keyed to the same `recipients`. Add
+  `--profile <name>` to any command (before or after the subcommand), or set `ENVSTOW_PROFILE`.
+  `envstow profile create <name>` makes a new one; `envstow profile` shows the current;
+  `envstow profiles` lists them. The unnamed `default` profile maps to the existing
+  `secrets/secrets.enc`, so existing repos are unaffected. Using a profile that doesn't exist
+  errors with a hint to create it (typo-safe).
+
 ## 0.1.5
 
 ### Changed

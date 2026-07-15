@@ -20,7 +20,31 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const RECIPIENTS_FILE: &str = "recipients";
+/// The default profile's store. Kept as `secrets.enc` (not `default.enc`) so existing repos
+/// work unchanged — the unnamed/`default` profile maps to this file.
 pub const STORE_FILE: &str = "secrets/secrets.enc";
+/// The name of the default (unnamed) profile.
+pub const DEFAULT_PROFILE: &str = "default";
+
+/// The store filename for a given profile. `default` → `secrets/secrets.enc` (backward compat);
+/// any other name → `secrets/<name>.enc`.
+pub fn store_file_for(profile: &str) -> String {
+    if profile == DEFAULT_PROFILE {
+        STORE_FILE.to_string()
+    } else {
+        format!("secrets/{profile}.enc")
+    }
+}
+
+/// Validate a profile name: non-empty, and only chars safe as a filename component (so it can't
+/// escape the `secrets/` dir or collide with the `.enc` suffix).
+pub fn valid_profile_name(name: &str) -> bool {
+    !name.is_empty()
+        && name != "secrets"
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
 
 /// A parsed recipient entry: the `age1...` key plus an optional human label from a trailing
 /// `# Name` comment. The label is cosmetic — matching/removal can use either.
@@ -70,14 +94,15 @@ pub struct Paths {
 }
 
 /// Walk up from the CWD to find the `recipients` file that anchors the repo; derive the store
-/// path beside it. Does not require the store to exist yet (init creates it).
-pub fn locate() -> Result<Paths, LayoutError> {
+/// path for `profile` beside it. Does not require the store to exist yet (init creates it).
+/// All profiles share the one `recipients` file.
+pub fn locate(profile: &str) -> Result<Paths, LayoutError> {
     let mut dir = env::current_dir().map_err(|e| LayoutError::Io(e.to_string()))?;
     loop {
         let cand = dir.join(RECIPIENTS_FILE);
         if cand.is_file() {
             return Ok(Paths {
-                store: dir.join(STORE_FILE),
+                store: dir.join(store_file_for(profile)),
                 recipients: cand,
             });
         }
@@ -85,6 +110,41 @@ pub fn locate() -> Result<Paths, LayoutError> {
             return Err(LayoutError::NoRecipientsFile);
         }
     }
+}
+
+/// The repo root (dir containing `recipients`), for enumerating profiles.
+pub fn repo_root() -> Result<PathBuf, LayoutError> {
+    let mut dir = env::current_dir().map_err(|e| LayoutError::Io(e.to_string()))?;
+    loop {
+        if dir.join(RECIPIENTS_FILE).is_file() {
+            return Ok(dir);
+        }
+        if !dir.pop() {
+            return Err(LayoutError::NoRecipientsFile);
+        }
+    }
+}
+
+/// List the profile names present in a repo (from `secrets/*.enc`). `secrets.enc` maps to the
+/// `default` profile name. Returns a sorted, de-duplicated list.
+pub fn list_profiles(root: &Path) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(root.join("secrets")) {
+        for e in entries.flatten() {
+            let fname = e.file_name();
+            let fname = fname.to_string_lossy();
+            if let Some(stem) = fname.strip_suffix(".enc") {
+                if stem == "secrets" {
+                    names.push(DEFAULT_PROFILE.to_string());
+                } else {
+                    names.push(stem.to_string());
+                }
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// Path to the identity (private key) file: `$ENVSTOW_IDENTITY` or the per-user config path.

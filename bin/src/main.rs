@@ -34,7 +34,21 @@ mod layout;
 use layout::Recipient;
 
 fn main() {
-    let args: Vec<String> = env::args().skip(1).collect();
+    let mut args: Vec<String> = env::args().skip(1).collect();
+    // Allow `--profile <name>` (or `--profile=<name>`) as a GLOBAL flag before the subcommand,
+    // e.g. `envstow --profile prod set X`. We lift it into ENVSTOW_PROFILE so the per-command
+    // resolve_profile() picks it up, then drop it from args so dispatch sees the subcommand.
+    if let Some(first) = args.first() {
+        if first == "--profile" {
+            if args.len() >= 2 {
+                env::set_var("ENVSTOW_PROFILE", &args[1]);
+                args.drain(0..2);
+            }
+        } else if let Some(name) = first.strip_prefix("--profile=") {
+            env::set_var("ENVSTOW_PROFILE", name);
+            args.remove(0);
+        }
+    }
     let code = match args.first().map(String::as_str) {
         Some("-h") | Some("--help") => {
             print_help();
@@ -50,14 +64,16 @@ fn main() {
         }
         Some("get") => cmd_get(&args[1..]),
         Some("set") => cmd_set(&args[1..]),
-        Some("edit") => cmd_edit(),
-        Some("list") => cmd_list(),
+        Some("edit") => cmd_edit(&args[1..]),
+        Some("list") => cmd_list(&args[1..]),
         Some("pubkey") => cmd_pubkey(),
         Some("unlock") => cmd_unlock(&args[1..]),
         Some("init") => cmd_init(&args[1..]),
         Some("add-recipient") => cmd_add_recipient(&args[1..]),
         Some("remove-recipient") => cmd_remove_recipient(&args[1..]),
-        Some("reencrypt") => cmd_reencrypt(),
+        Some("reencrypt") => cmd_reencrypt(&args[1..]),
+        Some("profile") => cmd_profile(&args[1..]),
+        Some("profiles") => cmd_profiles(),
         Some(other) => {
             eprintln!("envstow: unknown command '{other}'\n");
             print_help();
@@ -71,12 +87,53 @@ fn main() {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/// Decrypt the located store with the user's identity into ordered (name, value) pairs.
-/// The caller owns zeroizing the returned values.
-fn load_secrets() -> Result<Vec<(String, String)>, String> {
-    let paths = layout::locate().map_err(|e| e.to_string())?;
+/// Resolve which profile to use and return `(profile, remaining_args)` with any `--profile
+/// <name>` (or `--profile=<name>`) removed from the args. Precedence: `--profile` flag >
+/// `ENVSTOW_PROFILE` env var > `default`. Returns an error string on a bad/missing name.
+fn resolve_profile(args: &[String]) -> Result<(String, Vec<String>), String> {
+    let mut profile: Option<String> = None;
+    let mut rest = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "--profile" {
+            let Some(name) = args.get(i + 1) else {
+                return Err("--profile requires a name".into());
+            };
+            profile = Some(name.clone());
+            i += 2;
+        } else if let Some(name) = a.strip_prefix("--profile=") {
+            profile = Some(name.to_string());
+            i += 1;
+        } else {
+            rest.push(a.clone());
+            i += 1;
+        }
+    }
+    let profile = profile
+        .or_else(|| env::var("ENVSTOW_PROFILE").ok().filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| layout::DEFAULT_PROFILE.to_string());
+    if !layout::valid_profile_name(&profile) {
+        return Err(format!(
+            "invalid profile name '{profile}' (use letters, digits, - or _)"
+        ));
+    }
+    Ok((profile, rest))
+}
+
+/// Decrypt the located store for `profile` with the user's identity into ordered (name, value)
+/// pairs. The caller owns zeroizing the returned values.
+fn load_secrets(profile: &str) -> Result<Vec<(String, String)>, String> {
+    let paths = layout::locate(profile).map_err(|e| e.to_string())?;
     let secret = layout::read_identity_secret().map_err(|e| e.to_string())?;
     let identity = crypto::parse_identity(&secret).map_err(|e| e.to_string())?;
+    // A missing store for a NAMED profile means the profile doesn't exist — point the user at
+    // `profile create` rather than the generic "no store" error (guards against typos too).
+    if !paths.store.is_file() && profile != layout::DEFAULT_PROFILE {
+        return Err(format!(
+            "no such profile '{profile}'. Create it with `envstow profile create {profile}`"
+        ));
+    }
     let ciphertext = layout::read_store(&paths.store).map_err(|e| e.to_string())?;
 
     let mut text = crypto::decrypt_to_text(&ciphertext, &identity).map_err(|e| e.to_string())?;
@@ -154,9 +211,16 @@ fn masked_preview(value: &str) -> String {
 ///   * stdout is a terminal (human at a shell) → mask; a bare terminal print is rarely wanted.
 ///   * stdout is a pipe / command substitution (and NOT under an agent) → print the value.
 fn cmd_get(args: &[String]) -> i32 {
+    let (profile, args) = match resolve_profile(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow get: {e}");
+            return 2;
+        }
+    };
     let mut show = false;
     let mut name: Option<&str> = None;
-    for a in args {
+    for a in &args {
         match a.as_str() {
             "--show" => show = true,
             s if s.starts_with('-') => {
@@ -173,11 +237,11 @@ fn cmd_get(args: &[String]) -> i32 {
         }
     }
     let Some(name) = name else {
-        eprintln!("envstow get: usage: envstow get <NAME> [--show]");
+        eprintln!("envstow get: usage: envstow get <NAME> [--profile P] [--show]");
         return 2;
     };
 
-    let mut vars = match load_secrets() {
+    let mut vars = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -224,9 +288,16 @@ fn cmd_get(args: &[String]) -> i32 {
 /// `envstow set <NAME>` — read a value from STDIN (never argv) and store it under NAME,
 /// re-encrypting the store. Reading from stdin keeps the literal value off the command line.
 fn cmd_set(args: &[String]) -> i32 {
+    let (profile, args) = match resolve_profile(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow set: {e}");
+            return 2;
+        }
+    };
     let Some(name) = args.first() else {
         eprintln!(
-            "envstow set: usage: envstow set <NAME>   (then type the value + Enter, \
+            "envstow set: usage: envstow set <NAME> [--profile P]   (then type the value + Enter, \
              or pipe it: `printf '%s' value | envstow set <NAME>`)"
         );
         return 2;
@@ -260,7 +331,7 @@ fn cmd_set(args: &[String]) -> i32 {
         }
     }
 
-    let paths = match layout::locate() {
+    let paths = match layout::locate(&profile) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -268,7 +339,7 @@ fn cmd_set(args: &[String]) -> i32 {
             return 1;
         }
     };
-    let mut vars = match load_secrets() {
+    let mut vars = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -304,8 +375,15 @@ fn cmd_set(args: &[String]) -> i32 {
 }
 
 /// `envstow list` — print the variable NAMES in the store (never values).
-fn cmd_list() -> i32 {
-    let mut vars = match load_secrets() {
+fn cmd_list(args: &[String]) -> i32 {
+    let (profile, _args) = match resolve_profile(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow list: {e}");
+            return 2;
+        }
+    };
+    let mut vars = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -388,8 +466,15 @@ fn write_secrets(recipients_path: &Path, store: &Path, vars: &mut [(String, Stri
 /// `envstow edit` — decrypt the store to a private temp file, open `$EDITOR` on it, then
 /// re-encrypt the edited dotenv back to the store. The plaintext temp file is created 0600 in
 /// the user's config dir, overwritten with zeros, and removed on exit (success or failure).
-fn cmd_edit() -> i32 {
-    let paths = match layout::locate() {
+fn cmd_edit(args: &[String]) -> i32 {
+    let (profile, _args) = match resolve_profile(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow edit: {e}");
+            return 2;
+        }
+    };
+    let paths = match layout::locate(&profile) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -397,7 +482,7 @@ fn cmd_edit() -> i32 {
         }
     };
     // Decrypt current contents to text.
-    let mut vars = match load_secrets() {
+    let mut vars = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -513,13 +598,20 @@ fn shred_and_remove(path: &Path) {
 /// for a spawned child (an interactive subshell, or the given command). Values never printed;
 /// only variable NAMES are listed.
 fn cmd_unlock(args: &[String]) -> i32 {
+    let (profile, args) = match resolve_profile(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow unlock: {e}");
+            return 2;
+        }
+    };
     // Everything after `--` (or all args) is the command to run; empty → interactive subshell.
     let cmd: Vec<String> = match args.iter().position(|a| a == "--") {
         Some(i) => args[i + 1..].to_vec(),
         None => args.to_vec(),
     };
 
-    let vars = match load_secrets() {
+    let vars = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -778,8 +870,17 @@ fn maybe_install_skill(repo_root: &Path) {
 // ---------------------------------------------------------------------------
 
 fn cmd_add_recipient(args: &[String]) -> i32 {
+    let (profile, args) = match resolve_profile(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow add-recipient: {e}");
+            return 2;
+        }
+    };
     let Some(key) = args.first() else {
-        eprintln!("envstow add-recipient: usage: envstow add-recipient <age1...> [label]");
+        eprintln!(
+            "envstow add-recipient: usage: envstow add-recipient <age1...> [label] [--profile P]"
+        );
         return 2;
     };
     if crypto::parse_recipient(key).is_err() {
@@ -788,7 +889,7 @@ fn cmd_add_recipient(args: &[String]) -> i32 {
     }
     let label = args.get(1).cloned();
 
-    let paths = match layout::locate() {
+    let paths = match layout::locate(&profile) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -814,12 +915,19 @@ fn cmd_add_recipient(args: &[String]) -> i32 {
 }
 
 fn cmd_remove_recipient(args: &[String]) -> i32 {
+    let (profile, args) = match resolve_profile(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow remove-recipient: {e}");
+            return 2;
+        }
+    };
     let Some(target) = args.first() else {
-        eprintln!("envstow remove-recipient: usage: envstow remove-recipient <age1...|label>");
+        eprintln!("envstow remove-recipient: usage: envstow remove-recipient <age1...|label> [--profile P]");
         return 2;
     };
 
-    let paths = match layout::locate() {
+    let paths = match layout::locate(&profile) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -869,8 +977,15 @@ fn cmd_remove_recipient(args: &[String]) -> i32 {
     code
 }
 
-fn cmd_reencrypt() -> i32 {
-    let paths = match layout::locate() {
+fn cmd_reencrypt(args: &[String]) -> i32 {
+    let (profile, _args) = match resolve_profile(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow reencrypt: {e}");
+            return 2;
+        }
+    };
+    let paths = match layout::locate(&profile) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -883,6 +998,118 @@ fn cmd_reencrypt() -> i32 {
         return 1;
     }
     reencrypt_store(&paths.store, &recipients)
+}
+
+// ---------------------------------------------------------------------------
+// profiles
+// ---------------------------------------------------------------------------
+
+/// `envstow profile [create <name>]` — show the current profile (and available ones), or create
+/// a new one. The current profile is resolved from ENVSTOW_PROFILE (or `default`).
+fn cmd_profile(args: &[String]) -> i32 {
+    // Subcommand: `profile create <name>`
+    if args.first().map(String::as_str) == Some("create") {
+        let Some(name) = args.get(1) else {
+            eprintln!("envstow profile create: usage: envstow profile create <name>");
+            return 2;
+        };
+        return profile_create(name);
+    }
+    if !args.is_empty() {
+        eprintln!("envstow profile: usage: envstow profile [create <name>]");
+        return 2;
+    }
+
+    // Show current + available.
+    let current = env::var("ENVSTOW_PROFILE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| layout::DEFAULT_PROFILE.to_string());
+    let source = if env::var("ENVSTOW_PROFILE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .is_some()
+    {
+        "from $ENVSTOW_PROFILE"
+    } else {
+        "default"
+    };
+    println!("current profile: {current} ({source})");
+
+    match layout::repo_root() {
+        Ok(root) => {
+            let profiles = layout::list_profiles(&root);
+            if profiles.is_empty() {
+                eprintln!("   (no stores yet — run `envstow init`)");
+            } else {
+                eprintln!("available: {}", profiles.join(", "));
+            }
+        }
+        Err(_) => eprintln!("   (not inside an envstow repo)"),
+    }
+    0
+}
+
+/// `envstow profiles` — list the profiles that exist in this repo.
+fn cmd_profiles() -> i32 {
+    let root = match layout::repo_root() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("envstow: {e}");
+            return 1;
+        }
+    };
+    for p in layout::list_profiles(&root) {
+        println!("{p}");
+    }
+    0
+}
+
+/// Create an empty store for a new profile (encrypted to the current recipients).
+fn profile_create(name: &str) -> i32 {
+    if !layout::valid_profile_name(name) {
+        eprintln!("envstow: invalid profile name '{name}' (use letters, digits, - or _)");
+        return 2;
+    }
+    if name == layout::DEFAULT_PROFILE {
+        eprintln!("envstow: '{name}' is the default profile — it already exists after `init`.");
+        return 1;
+    }
+    let paths = match layout::locate(name) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow: {e}");
+            return 1;
+        }
+    };
+    if paths.store.is_file() {
+        eprintln!(
+            "envstow: profile '{name}' already exists at {}",
+            paths.store.display()
+        );
+        return 1;
+    }
+    let recipients = layout::read_recipients(&paths.recipients).unwrap_or_default();
+    if recipients.is_empty() {
+        eprintln!("envstow: recipients file has no keys — run `envstow init` first.");
+        return 1;
+    }
+    let seed = format!("# envstow profile '{name}' -- KEY=value lines.\n");
+    match encrypt_payload(seed.as_bytes(), &recipients) {
+        Ok(ct) => {
+            if let Err(e) = layout::write_store(&paths.store, &ct) {
+                eprintln!("envstow: could not write store: {e}");
+                return 1;
+            }
+            eprintln!("✔  created profile '{name}' at {}", paths.store.display());
+            eprintln!("   use it with:  envstow --profile {name} set <NAME>   (or export ENVSTOW_PROFILE={name})");
+            0
+        }
+        Err(e) => {
+            eprintln!("envstow: could not create profile store: {e}");
+            1
+        }
+    }
 }
 
 /// Decrypt the store with our identity and re-encrypt it to `recipients`. Used after any change
@@ -1009,6 +1236,11 @@ fn print_help() {
          \x20 envstow add-recipient <age1..>   Add a collaborator and re-encrypt.\n\
          \x20 envstow remove-recipient <k|nm>  Remove a collaborator and re-encrypt (then rotate).\n\
          \x20 envstow reencrypt                Re-encrypt the store to the current recipients.\n\
+         \x20 envstow profile [create <name>]  Show the current profile, or create a new one.\n\
+         \x20 envstow profiles                 List available profiles.\n\
+         \n\
+         Profiles: add `--profile <name>` to any command to use a separate secret set\n\
+         (e.g. dev/staging/prod), or set $ENVSTOW_PROFILE. Default is `default`.\n\
          \x20 envstow --version                Print the envstow version.\n\
          \n\
          EXAMPLES:\n\

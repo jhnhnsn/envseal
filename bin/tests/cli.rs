@@ -236,6 +236,79 @@ fn init_no_skill_flag_skips_the_skill() {
 }
 
 #[test]
+fn profiles_are_isolated() {
+    let repo = Repo::new("profiles");
+    assert_eq!(repo.run(&["init", "--no-skill"], "").code, 0);
+
+    // Default profile stores one value.
+    assert_eq!(repo.run(&["set", "SHARED"], "default-val").code, 0);
+
+    // Create a named profile and store a DIFFERENT value under the same key.
+    let created = repo.run(&["profile", "create", "prod"], "");
+    assert_eq!(created.code, 0, "profile create failed: {}", created.stderr);
+    assert_eq!(
+        repo.run(&["--profile", "prod", "set", "SHARED"], "prod-val")
+            .code,
+        0
+    );
+
+    // Each profile reads back its OWN value (isolation).
+    let d = repo.run(&["unlock", "--", "sh", "-c", "printf '%s' \"$SHARED\""], "");
+    assert_eq!(d.stdout, "default-val", "default profile value");
+    let p = repo.run(
+        &[
+            "--profile",
+            "prod",
+            "unlock",
+            "--",
+            "sh",
+            "-c",
+            "printf '%s' \"$SHARED\"",
+        ],
+        "",
+    );
+    assert_eq!(p.stdout, "prod-val", "prod profile value");
+
+    // Both flag positions work: post-command --profile too.
+    let p2 = repo.run(
+        &[
+            "unlock",
+            "--profile",
+            "prod",
+            "--",
+            "sh",
+            "-c",
+            "printf '%s' \"$SHARED\"",
+        ],
+        "",
+    );
+    assert_eq!(p2.stdout, "prod-val", "post-command --profile");
+
+    // `profiles` lists both.
+    let list = repo.run(&["profiles"], "");
+    assert!(
+        list.stdout.contains("default"),
+        "lists default: {}",
+        list.stdout
+    );
+    assert!(list.stdout.contains("prod"), "lists prod: {}", list.stdout);
+}
+
+#[test]
+fn unknown_profile_errors_helpfully() {
+    let repo = Repo::new("badprofile");
+    assert_eq!(repo.run(&["init", "--no-skill"], "").code, 0);
+    // Using a profile that was never created should fail with a helpful message, not silently.
+    let out = repo.run(&["--profile", "nope", "list"], "");
+    assert_ne!(out.code, 0, "unknown profile should fail");
+    assert!(
+        out.stderr.contains("no such profile") && out.stderr.contains("profile create"),
+        "should suggest creating it: {}",
+        out.stderr
+    );
+}
+
+#[test]
 fn version_flag_prints_crate_version() {
     let repo = Repo::new("version");
     let expected = format!("envstow {}", env!("CARGO_PKG_VERSION"));

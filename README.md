@@ -198,6 +198,25 @@ stays one line per key); `unlock`/`get` decode them transparently, so the env va
 sees is the exact original. Single-line secrets are stored as-is. Pasting a multi-line value
 into the interactive prompt won't work — pipe it or use `envstow edit`.
 
+### Profiles
+
+A repo can hold multiple secret sets — e.g. `dev`, `staging`, `prod` — as separate encrypted
+stores (`secrets/<profile>.enc`), all keyed to the same `recipients`. The unnamed **`default`**
+profile is the usual `secrets/secrets.enc`, so existing repos need no changes.
+
+```bash
+envstow profile create prod                 # create a new profile (empty store)
+envstow --profile prod set DB_URL           # write to prod's store
+envstow --profile prod unlock -- npm start  # run with prod's secrets
+export ENVSTOW_PROFILE=prod                  # …or make it sticky for the shell
+envstow profile                              # show the current profile + list available
+envstow profiles                             # list profiles
+```
+
+Selection precedence: `--profile <name>` flag (before or after the subcommand) > `ENVSTOW_PROFILE`
+env var > `default`. Using a profile that doesn't exist errors and tells you to
+`envstow profile create` it (so a typo can't silently make a junk store).
+
 ---
 
 ## Command reference
@@ -214,6 +233,9 @@ into the interactive prompt won't work — pipe it or use `envstow edit`.
 | `envstow add-recipient <age1…> [label]` | Add a collaborator; re-encrypt. |
 | `envstow remove-recipient <key\|label>` | Remove a collaborator; re-encrypt (then **rotate**). |
 | `envstow reencrypt` | Re-encrypt the store to the current `recipients` (after hand-editing it). |
+| `envstow profile [create <name>]` | Show the current profile, or create a new one. |
+| `envstow profiles` | List available profiles. |
+| `--profile <name>` | (On any command) use a separate secret set; see [Profiles](#profiles). |
 
 **Environment:** `ENVSTOW_IDENTITY` overrides the identity path (default
 `~/.config/envstow/identity.txt`). `ENVSTOW_AGENT=1` forces agent-masking for `get` in tools
