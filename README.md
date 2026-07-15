@@ -31,12 +31,15 @@ call, or its transcript. You only ever type the variable **name**.
 
 ## Install
 
+**macOS / Linux** — a prebuilt binary, no toolchain needed:
+
 ```bash
-# macOS / Linux — prebuilt binary, no toolchain needed:
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.sh | sh
 ```
+
+**Windows** (PowerShell):
+
 ```powershell
-# Windows (PowerShell):
 powershell -c "irm https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.ps1 | iex"
 ```
 
