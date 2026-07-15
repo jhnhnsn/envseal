@@ -1,16 +1,16 @@
 ---
 name: envstow
-description: Use envstow to access encrypted secrets in a repo that uses it — reference secrets by name, run commands that need them, and onboard to the shared store. Load this whenever a task needs an API key, token, password, database URL, or any secret (e.g. deploy, call an authed API, run migrations, set an env var), when `envstow` commands fail, or when a teammate needs to be added to the secret store. Only applies if the repo has a `recipients` file and `secrets/secrets.enc`.
+description: Use envstow to access encrypted secrets in a repo that uses it — reference secrets by name, run commands that need them, and onboard to the shared store. Load this whenever a task needs an API key, token, password, database URL, or any secret (e.g. deploy, call an authed API, run migrations, set an env var), when `envstow` commands fail, or when a teammate needs to be added to the secret store. Only applies if the repo has a `.envstow/recipients` file and `.envstow/default.enc`.
 ---
 
 # Using envstow
 
-envstow manages secrets as an **age-encrypted key-value store** (`secrets/secrets.enc`)
+envstow manages secrets as an **age-encrypted key-value store** (`.envstow/default.enc`)
 committed to a repo. `envstow` is a single self-contained binary — no `sops`/`age` CLIs needed.
 Secrets are used **by name**; their plaintext must never enter your output, a tool-call
 argument, or a file.
 
-**Does this repo use envstow?** It does if there's a `recipients` file and `secrets/secrets.enc`
+**Does this repo use envstow?** It does if there's a `.envstow/recipients` file and `.envstow/default.enc`
 at the repo root (`envstow list` succeeds). If not, this skill doesn't apply — the repo may use
 a plain `.env` or another secrets tool.
 
@@ -64,12 +64,12 @@ envstow set SOME_TOKEN                            # interactive: prompts, human 
 envstow set TLS_KEY < key.pem                     # multi-line value (PEM, cert, JSON) from a file
 ```
 
-After changing secrets, remind the human to `git add secrets/secrets.enc && git commit`.
+After changing secrets, remind the human to `git add .envstow && git commit`.
 
 ## Common failures and what they mean
 
 - **`no 'recipients' file found ... (run envstow init first)`** — you are not inside an
-  envstow repo. `cd` into the project root (the dir containing `recipients`) and retry. Do NOT
+  envstow repo. `cd` into the project root (the dir containing `.envstow/`) and retry. Do NOT
   run `envstow init` in a repo that already has a store elsewhere.
 - **`decryption failed: No matching keys found`** — the current identity isn't a recipient of
   this store. The human needs to be added (see Onboarding) and the store re-encrypted.
@@ -87,7 +87,7 @@ Adding a person is a two-sided key exchange. Walk the human through it:
 2. **An existing member** adds them and re-encrypts:
    ```bash
    envstow add-recipient age1theirkey... alice
-   git add recipients secrets/secrets.enc && git commit -m "Add alice" && git push
+   git add .envstow && git commit -m "Add alice" && git push
    ```
 3. The new teammate pulls; they can now decrypt with their own key.
 

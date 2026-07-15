@@ -742,10 +742,14 @@ fn cmd_init(args: &[String]) -> i32 {
     };
     eprintln!("   your public key: {public}");
 
-    // 2. Recipients file in the CWD (this becomes the repo root anchor).
-    let recipients_path = env::current_dir()
-        .unwrap_or_else(|_| ".".into())
-        .join(layout::RECIPIENTS_FILE);
+    // 2. Recipients file under .envstow/ in the CWD (this becomes the repo root anchor).
+    let root = env::current_dir().unwrap_or_else(|_| ".".into());
+    // Ensure the .envstow/ dir exists before we write into it.
+    if let Err(e) = std::fs::create_dir_all(root.join(layout::ENVSTOW_DIR)) {
+        eprintln!("envstow: could not create {}: {e}", layout::ENVSTOW_DIR);
+        return 1;
+    }
+    let recipients_path = root.join(layout::RECIPIENTS_FILE);
     let mut recipients = if recipients_path.is_file() {
         layout::read_recipients(&recipients_path).unwrap_or_default()
     } else {
@@ -779,11 +783,8 @@ fn cmd_init(args: &[String]) -> i32 {
         eprintln!("✔  added you to {}", recipients_path.display());
     }
 
-    // 3. Encrypted store: create an empty one if absent.
-    let store_path = recipients_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(layout::STORE_FILE);
+    // 3. Encrypted store: create an empty one if absent (the default profile → .envstow/default.enc).
+    let store_path = root.join(layout::STORE_FILE);
     if store_path.is_file() {
         eprintln!("✔  store already exists at {}", store_path.display());
     } else {
@@ -806,7 +807,7 @@ fn cmd_init(args: &[String]) -> i32 {
     // 4. Offer to add the Claude Code agent skill to THIS repo (so it commits + travels to
     //    teammates). Prompts [Y/n]; --no-skill skips; non-interactive defaults to yes.
     if !skip_skill {
-        let repo_root = recipients_path.parent().unwrap_or(Path::new("."));
+        let repo_root = root.as_path();
         maybe_install_skill(repo_root);
     }
 

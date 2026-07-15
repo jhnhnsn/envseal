@@ -1,9 +1,8 @@
 # Never commit plaintext secrets or private keys.
 # This is the envstow tool's OWN repo — it does not carry a real secret store. If you dogfood
-# envstow here (`envstow init`), the generated store/recipients are ignored so they aren't
-# committed. (In a normal project that USES envstow, you DO commit recipients + secrets.enc.)
-/recipients
-/secrets/
+# envstow here (`envstow init`), the generated .envstow/ dir is ignored so it isn't committed.
+# (In a normal project that USES envstow, you DO commit the .envstow/ dir.)
+/.envstow/
 
 # Decrypted / plaintext env files
 *.dec.env

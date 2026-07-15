@@ -4,14 +4,19 @@ All notable changes to envstow are documented here. Versions follow [SemVer](htt
 
 ## Unreleased
 
+### Changed (breaking — re-run `envstow init`)
+- **New on-disk layout: everything lives under `.envstow/`.** Recipients moved to
+  `.envstow/recipients` and the store is now `.envstow/default.enc` (was `recipients` +
+  `secrets/secrets.enc`). Clean break — a repo on the old layout must be re-initialized.
+  Commit the whole `.envstow/` directory.
+
 ### Added
 - **Profiles.** A repo can hold multiple secret sets (e.g. `dev`/`staging`/`prod`) as separate
-  encrypted stores (`secrets/<profile>.enc`), all keyed to the same `recipients`. Add
+  encrypted stores (`.envstow/<profile>.enc`), all keyed to the same `.envstow/recipients`. Add
   `--profile <name>` to any command (before or after the subcommand), or set `ENVSTOW_PROFILE`.
   `envstow profile create <name>` makes a new one; `envstow profile` shows the current;
-  `envstow profiles` lists them. The unnamed `default` profile maps to the existing
-  `secrets/secrets.enc`, so existing repos are unaffected. Using a profile that doesn't exist
-  errors with a hint to create it (typo-safe).
+  `envstow profiles` lists them. The unnamed `default` profile is `.envstow/default.enc`. Using
+  a profile that doesn't exist errors with a hint to create it (typo-safe).
 
 ## 0.1.5
 

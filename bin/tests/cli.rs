@@ -118,10 +118,10 @@ impl Repo {
     }
 
     fn store(&self) -> PathBuf {
-        self.dir.join("secrets").join("secrets.enc")
+        self.dir.join(".envstow").join("default.enc")
     }
     fn recipients(&self) -> PathBuf {
-        self.dir.join("recipients")
+        self.dir.join(".envstow").join("recipients")
     }
     fn public_key(&self) -> String {
         // The recipients file lists our key; grab the first age1 token.

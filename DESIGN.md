@@ -33,7 +33,7 @@ value must be resolved *per command*, in the same process tree as its use.
 - **age** (X25519 + ChaCha20-Poly1305) via the mature `age` Rust crate — compiled into the
   binary. **Multi-recipient**: encrypted to each collaborator's age public key.
 - **No external CLIs at runtime** (no `sops`, no `age` binary, no `rops`). Self-contained.
-- **File:** `secrets/secrets.enc` — an age-encrypted blob whose plaintext is dotenv
+- **File:** `.envstow/default.enc` (default profile) — an age-encrypted blob whose plaintext is dotenv
   (`KEY=value` lines). Committed to git.
 - Recipients live in a small committed config (age public keys). Adding/removing a recipient
   re-encrypts the file to the new set.

@@ -87,10 +87,10 @@ pick the exact location.
 ## 2. Create your key and share it
 
 > **envstow works per project directory.** Every command operates on the secret store of the
-> repo you're currently *inside* — it looks for a `recipients` file in the current directory and
+> repo you're currently *inside* — it looks for a `.envstow/` dir in the current directory and
 > walks up to find the project root. So always `cd` into the project first. One machine, one
 > personal key (in `~/.config/envstow/`), but each repo has its own `recipients` + encrypted
-> store. Running a command outside any envstow repo gives you "no `recipients` file found."
+> store. Running a command outside any envstow repo gives you "no `.envstow/` found."
 
 From inside the project:
 
@@ -119,7 +119,7 @@ An existing member runs:
 
 ```bash
 envstow add-recipient age1yourkey... your-name
-git add recipients secrets/secrets.enc && git commit -m "Add your-name" && git push
+git add .envstow && git commit -m "Add your-name" && git push
 ```
 
 Then you `git pull`, and you're in:

@@ -17,8 +17,9 @@ Code, Cursor, …) has to paste a secret's plaintext onto a command line.
 ## How it works
 
 ```
-recipients                        # age PUBLIC keys, committed. Who can decrypt.
-secrets/secrets.enc               # age-encrypted KEY=value store, committed.
+.envstow/recipients               # age PUBLIC keys, committed. Who can decrypt.
+.envstow/default.enc              # age-encrypted KEY=value store (default profile), committed.
+.envstow/<profile>.enc            # additional profiles (dev/staging/prod), committed.
 ~/.config/envstow/identity.txt    # YOUR age private key. Never committed. (0600)
                                   #   Windows: %APPDATA%\envstow\identity.txt
 ```
@@ -65,7 +66,7 @@ process envstow spawns.
 
 ```bash
 envstow init
-git add recipients secrets/secrets.enc && git commit -m "Add envstow store"
+git add .envstow && git commit -m "Add envstow store"
 ```
 
 `init` creates your private key (in `~/.config/envstow/`, never committed), the `recipients`
@@ -141,7 +142,7 @@ envstow init && envstow pubkey        # → age1abc…
 
 # You: add her, re-encrypt, commit.
 envstow add-recipient age1abc… alice
-git add recipients secrets/secrets.enc && git commit -m "Add Alice"
+git add .envstow && git commit -m "Add Alice"
 ```
 
 Only the **public** key (`age1…`) is shared — it lets you encrypt *to* someone, never decrypt.
@@ -201,8 +202,8 @@ into the interactive prompt won't work — pipe it or use `envstow edit`.
 ### Profiles
 
 A repo can hold multiple secret sets — e.g. `dev`, `staging`, `prod` — as separate encrypted
-stores (`secrets/<profile>.enc`), all keyed to the same `recipients`. The unnamed **`default`**
-profile is the usual `secrets/secrets.enc`, so existing repos need no changes.
+stores (`.envstow/<profile>.enc`), all keyed to the same `.envstow/recipients`. The unnamed
+**`default`** profile is `.envstow/default.enc`.
 
 ```bash
 envstow profile create prod                 # create a new profile (empty store)

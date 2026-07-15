@@ -1,46 +1,43 @@
 //! envstow file & key layout — where the identity, recipients, and encrypted store live,
 //! and how they are located, read, and written.
 //!
-//! Locations
+//! Locations (all repo files live under `.envstow/` at the repo root)
 //! ---------
 //!   * Identity (PRIVATE key): `$ENVSTOW_IDENTITY`, else `~/.config/envstow/identity.txt`
 //!     (`%APPDATA%\envstow\identity.txt` on Windows). Contains one `AGE-SECRET-KEY-...` line.
 //!     Never committed; created mode 0600 on Unix.
-//!   * Recipients (PUBLIC keys): `recipients` at the repo root. Committed. One `age1...` per
-//!     line; `#` comments and optional trailing `# Name` allowed. This is the recipient set
-//!     the store is encrypted to.
-//!   * Encrypted store: `secrets/secrets.enc` (age binary), beside the `recipients` file.
-//!     Committed. Plaintext payload is dotenv.
+//!   * Recipients (PUBLIC keys): `.envstow/recipients`. Committed. One `age1...` per line;
+//!     `#` comments and optional trailing `# Name` allowed. Shared across all profiles.
+//!   * Encrypted stores: `.envstow/<profile>.enc` (age binary), one per profile. Committed.
+//!     The default profile is `.envstow/default.enc`. Plaintext payload is dotenv.
 //!
-//! The repo root is whatever directory (walking up from the CWD) contains a `recipients`
-//! file — that anchors both the store and any relative operations.
+//! The repo root is whatever directory (walking up from the CWD) contains a `.envstow/recipients`
+//! file — that anchors the stores and any relative operations.
 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const RECIPIENTS_FILE: &str = "recipients";
-/// The default profile's store. Kept as `secrets.enc` (not `default.enc`) so existing repos
-/// work unchanged — the unnamed/`default` profile maps to this file.
-pub const STORE_FILE: &str = "secrets/secrets.enc";
+/// All envstow files for a repo live in this directory at the repo root.
+pub const ENVSTOW_DIR: &str = ".envstow";
+/// The recipients file, relative to the repo root (inside `.envstow/`).
+pub const RECIPIENTS_FILE: &str = ".envstow/recipients";
+/// The default profile's store, relative to the repo root. Named `default.enc` so the file
+/// tells you which profile it is.
+pub const STORE_FILE: &str = ".envstow/default.enc";
 /// The name of the default (unnamed) profile.
 pub const DEFAULT_PROFILE: &str = "default";
 
-/// The store filename for a given profile. `default` → `secrets/secrets.enc` (backward compat);
-/// any other name → `secrets/<name>.enc`.
+/// The store filename for a given profile, relative to the repo root: `.envstow/<profile>.enc`.
 pub fn store_file_for(profile: &str) -> String {
-    if profile == DEFAULT_PROFILE {
-        STORE_FILE.to_string()
-    } else {
-        format!("secrets/{profile}.enc")
-    }
+    format!("{ENVSTOW_DIR}/{profile}.enc")
 }
 
 /// Validate a profile name: non-empty, and only chars safe as a filename component (so it can't
-/// escape the `secrets/` dir or collide with the `.enc` suffix).
+/// escape the `.envstow/` dir or collide with the `.enc` suffix). `recipients` is reserved.
 pub fn valid_profile_name(name: &str) -> bool {
     !name.is_empty()
-        && name != "secrets"
+        && name != "recipients"
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -125,20 +122,16 @@ pub fn repo_root() -> Result<PathBuf, LayoutError> {
     }
 }
 
-/// List the profile names present in a repo (from `secrets/*.enc`). `secrets.enc` maps to the
-/// `default` profile name. Returns a sorted, de-duplicated list.
+/// List the profile names present in a repo (from `.envstow/*.enc`). Each `<name>.enc` is the
+/// profile `<name>` (so `default.enc` → `default`). Returns a sorted, de-duplicated list.
 pub fn list_profiles(root: &Path) -> Vec<String> {
     let mut names = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(root.join("secrets")) {
+    if let Ok(entries) = std::fs::read_dir(root.join(ENVSTOW_DIR)) {
         for e in entries.flatten() {
             let fname = e.file_name();
             let fname = fname.to_string_lossy();
             if let Some(stem) = fname.strip_suffix(".enc") {
-                if stem == "secrets" {
-                    names.push(DEFAULT_PROFILE.to_string());
-                } else {
-                    names.push(stem.to_string());
-                }
+                names.push(stem.to_string());
             }
         }
     }

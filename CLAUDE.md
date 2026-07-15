@@ -1,6 +1,6 @@
 # envstow — project instructions
 
-This repo stores an **age-encrypted key-value store** (`secrets/secrets.enc`) checked into git.
+This repo stores an **age-encrypted key-value store** (`.envstow/default.enc`) checked into git.
 Each collaborator decrypts it with **their own age private key**. Secrets are surfaced **by
 name** so their plaintext never has to be pasted onto a command line. All crypto is the `age`
 crate compiled into the `envstow` binary — there are no external tools (`sops`/`age` CLIs) to
