@@ -1141,6 +1141,130 @@ fn edit_updates_the_store() {
 }
 
 #[test]
+fn a_newcomer_is_told_how_to_get_access_not_just_that_it_failed() {
+    // The most common first-run failure: installed envstow, cloned the repo, nobody's added you.
+    // age says "No matching keys found", which reads like a bug — especially since `init` has
+    // just reported adding your key to `recipients`. Both messages must name the real next step.
+    let owner = Repo::new("newcomer-owner");
+    assert_eq!(owner.run(&["init", "--no-skill"], "").code, 0);
+    assert_eq!(owner.run(&["set", "SECRET"], "ownersvalue").code, 0);
+
+    // A newcomer with their own identity, running init INSIDE the owner's repo (what ONBOARDING
+    // currently tells people to do) — this appends their key to recipients but grants nothing.
+    let newcomer_id = owner.dir.join("newcomer-identity.txt");
+    let init = Command::new(BIN)
+        .args(["init", "--no-skill"])
+        .current_dir(&owner.dir)
+        .env("ENVSTOW_IDENTITY", &newcomer_id)
+        .output()
+        .unwrap();
+    let init_err = String::from_utf8_lossy(&init.stderr);
+    // init must NOT claim they're ready — they can't decrypt yet.
+    assert!(
+        !init_err.contains("🔓 Ready"),
+        "init must not say Ready when joining someone else's store: {init_err}"
+    );
+    assert!(
+        init_err.contains("add-recipient"),
+        "init should name the command that grants access: {init_err}"
+    );
+
+    // Now the decryption failure itself must explain, not just fail. Note `init`-in-the-repo has
+    // just APPENDED their key to recipients, so they're in the listed-but-not-yet-re-encrypted
+    // case — the honest fix is a recipient running `reencrypt`, and that's what it must say.
+    let unlock = Command::new(BIN)
+        .args(["unlock", "--", "true"])
+        .current_dir(&owner.dir)
+        .env("ENVSTOW_IDENTITY", &newcomer_id)
+        .output()
+        .unwrap();
+    assert_ne!(unlock.status.code(), Some(0), "should fail");
+    let err = String::from_utf8_lossy(&unlock.stderr);
+    assert!(
+        err.contains("reencrypt"),
+        "should name the command that fixes it: {err}"
+    );
+    assert!(
+        err.contains("input to") && err.contains("not an access list"),
+        "should correct the mental model that recipients == access: {err}"
+    );
+    assert!(
+        !err.contains("No matching keys"),
+        "should replace the cryptic age error, not append to it: {err}"
+    );
+}
+
+#[test]
+fn a_key_that_was_never_added_is_told_to_send_its_pubkey() {
+    // The other newcomer path: they generated an identity WITHOUT running init in the repo (or
+    // ran it elsewhere), so their key was never appended to recipients. Here the fix is
+    // `add-recipient`, and they need their public key printed so they can send it.
+    let owner = Repo::new("never-owner");
+    assert_eq!(owner.run(&["init", "--no-skill"], "").code, 0);
+    assert_eq!(owner.run(&["set", "SECRET"], "ownersvalue").code, 0);
+
+    let stranger = Repo::new("never-stranger");
+    assert_eq!(stranger.run(&["init", "--no-skill"], "").code, 0);
+
+    let out = Command::new(BIN)
+        .args(["list"])
+        .current_dir(&owner.dir) // owner's store + recipients (stranger is absent from it)
+        .env("ENVSTOW_IDENTITY", &stranger.identity)
+        .output()
+        .unwrap();
+    assert_ne!(out.status.code(), Some(0), "can't decrypt");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("add-recipient"),
+        "should name the command that grants access: {err}"
+    );
+    assert!(
+        err.contains(&stranger.public_key()),
+        "should print THEIR public key so they can send it: {err}"
+    );
+    assert!(
+        !err.contains("No matching keys"),
+        "should explain, not surface the raw age error: {err}"
+    );
+}
+
+#[test]
+fn a_listed_but_not_yet_reencrypted_key_gets_a_different_hint() {
+    // Distinct case: your key IS in recipients (someone committed it, or you added it yourself),
+    // but nobody has re-encrypted, so the ciphertext still doesn't include you. The fix is
+    // `reencrypt`, not `add-recipient` — the message must say so.
+    let owner = Repo::new("stale-owner");
+    assert_eq!(owner.run(&["init", "--no-skill"], "").code, 0);
+    assert_eq!(owner.run(&["set", "SECRET"], "ownersvalue").code, 0);
+
+    // Generate a second identity elsewhere, then hand-add its key to recipients WITHOUT
+    // re-encrypting — exactly what `init`-in-the-repo does.
+    let other = Repo::new("stale-other");
+    assert_eq!(other.run(&["init", "--no-skill"], "").code, 0);
+    let other_pub = other.public_key();
+    let mut recips = std::fs::read_to_string(owner.recipients()).unwrap();
+    recips.push_str(&format!("{other_pub}  # pending\n"));
+    std::fs::write(owner.recipients(), recips).unwrap();
+
+    let out = Command::new(BIN)
+        .args(["list"])
+        .current_dir(&owner.dir)
+        .env("ENVSTOW_IDENTITY", &other.identity)
+        .output()
+        .unwrap();
+    assert_ne!(out.status.code(), Some(0), "still can't decrypt");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("reencrypt"),
+        "listed-but-stale should point at reencrypt: {err}"
+    );
+    assert!(
+        !err.contains("No matching keys"),
+        "should explain, not surface the raw age error: {err}"
+    );
+}
+
+#[test]
 fn add_and_remove_recipient_controls_access() {
     // Owner repo.
     let owner = Repo::new("owner");

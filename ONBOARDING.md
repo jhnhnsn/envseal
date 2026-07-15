@@ -38,12 +38,15 @@ sh envstow-installer.sh
 **Via authenticated `gh`, or verify the checksum by hand:**
 
 ```bash
-gh release download v0.1.1 --repo jhnhnsn/envstow --pattern '*installer.sh' -O envstow-installer.sh
+gh release download --repo jhnhnsn/envstow --pattern '*installer.sh' -O envstow-installer.sh
 sh envstow-installer.sh
 #   …or download your platform's archive + its .sha256 and verify by hand:
-gh release download v0.1.1 --repo jhnhnsn/envstow --pattern '*apple-darwin*'
+gh release download --repo jhnhnsn/envstow --pattern '*apple-darwin*'
 shasum -a 256 -c envstow-*.tar.xz.sha256      # must print "OK"
 ```
+
+(No tag means the latest release. Only the newest release keeps its built artifacts — older
+versions stay rebuildable from their git tags, so pin by building from source if you need one.)
 
 **Custom install location** — set `ENVSTOW_INSTALL_DIR` (e.g. a dir already on your PATH):
 
@@ -110,8 +113,10 @@ Send that `age1...` public key to a current member (Slack, email, or — best �
 adds it to the `recipients` file). Your **private** key stays in `~/.config/envstow/` and is
 never shared or committed.
 
-> ⚠️ Running `envstow init` adds your name to `recipients`, but you **cannot decrypt the store
-> yet** — an existing member has to add your key and re-encrypt (step 3).
+> ⚠️ **`recipients` is an input to encryption, not an access list.** Running `envstow init` adds
+> your key to that file, but you **cannot decrypt the store yet** — the ciphertext is only re-keyed
+> when an existing member re-encrypts it (step 3). Until then `envstow list`/`unlock` will tell you
+> exactly who needs to run what.
 
 ## 3. A current member adds you
 

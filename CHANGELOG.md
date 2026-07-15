@@ -2,6 +2,30 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.14
+
+### Changed
+- **"No matching keys found" now explains itself.** age's message covered several unrelated
+  situations, and explained the most common one worst: you installed envstow, cloned the repo, and
+  nobody has added you yet. It read like a bug — especially right after `init` reported adding your
+  key to `recipients` and printed "🔓 Ready". envstow can tell the cases apart before decrypting,
+  by comparing your public key against the recipients file:
+  ```
+  envstow: your key isn't a recipient of this store, so you can't decrypt it yet.
+     Your public key:
+       age1xw73c7…
+     Send it to someone who already has access and ask them to run:
+       envstow add-recipient age1xw73c7… <your-name>
+  ```
+  If your key *is* listed but the store predates it, the fix is different and it says so — ask a
+  recipient to `envstow reencrypt`. Genuinely unrelated failures keep their original message.
+- **`envstow init` no longer claims "🔓 Ready" when you're joining someone else's store.** It ends
+  with `⏳ Almost there`, your public key, and the exact `add-recipient` command to send — because
+  adding your key to `recipients` grants nothing until a recipient re-encrypts.
+- ONBOARDING.md: sharpened the same point (`recipients` is an **input to encryption, not an access
+  list**) and dropped `gh release download` examples pinned to a version whose artifacts the
+  prune policy has since removed.
+
 ## 0.1.13
 
 ### Changed

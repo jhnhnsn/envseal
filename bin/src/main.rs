@@ -148,7 +148,8 @@ fn load_secrets(profile: &str) -> Result<Vec<(String, String)>, String> {
     }
     let ciphertext = layout::read_store(&paths.store).map_err(|e| e.to_string())?;
 
-    let mut text = crypto::decrypt_to_text(&ciphertext, &identity).map_err(|e| e.to_string())?;
+    let mut text = crypto::decrypt_to_text(&ciphertext, &identity)
+        .map_err(|e| explain_decrypt_failure(e.to_string(), &secret, &paths.recipients))?;
     let parsed = crypto::parse_dotenv(&text);
     text.zeroize();
     // Decode any base64-marked (multi-line) values back to their originals.
@@ -158,6 +159,53 @@ fn load_secrets(profile: &str) -> Result<Vec<(String, String)>, String> {
         vars.push((k, decoded));
     }
     Ok(vars)
+}
+
+/// Turn age's `No matching keys found` into an error that says what to actually do.
+///
+/// That one message covers several very different situations, and the most common — "you've
+/// installed envstow and cloned the repo, but nobody has added you yet" — is the one it explains
+/// worst. It reads as though something is broken, especially right after `init` has cheerfully
+/// reported adding your key to `recipients`. (It did; but `recipients` is an INPUT to encryption,
+/// not an access list. Your key only grants decryption once an existing recipient re-encrypts.)
+///
+/// We can tell the cases apart without any crypto: compare our public key against the recipients
+/// file. If we're absent, we were never added. If we're present but decryption still failed, the
+/// store is stale — encrypted before our key was listed, and someone needs to `reencrypt`.
+fn explain_decrypt_failure(original: String, secret: &str, recipients_path: &Path) -> String {
+    // Only reinterpret the "your key doesn't open this" case; other failures (corrupt file, bad
+    // format) should keep their own message.
+    if !original.contains("No matching keys") {
+        return original;
+    }
+    let Ok(public) = crypto::public_from_secret(secret) else {
+        return original;
+    };
+    let listed = layout::read_recipients(recipients_path)
+        .map(|rs| rs.iter().any(|r| r.key == public))
+        .unwrap_or(false);
+
+    if listed {
+        format!(
+            "your key is listed in `{}`, but the store wasn't encrypted to it yet.\n\
+             \x20  The store is re-keyed only when someone runs a re-encrypt. Ask an existing \
+             recipient to:\n\
+             \x20    git pull && envstow reencrypt && git add .envstow && git commit && git push\n\
+             \x20  (Adding a key to `recipients` alone does not grant access — that file is an \
+             input to\n\
+             \x20   encryption, not an access list.)",
+            recipients_path.display()
+        )
+    } else {
+        format!(
+            "your key isn't a recipient of this store, so you can't decrypt it yet.\n\
+             \x20  Your public key:\n\
+             \x20    {public}\n\
+             \x20  Send it to someone who already has access and ask them to run:\n\
+             \x20    envstow add-recipient {public} <your-name>\n\
+             \x20  …then `git pull` once they've pushed."
+        )
+    }
 }
 
 /// Environment markers set by AI coding agents that capture command output into their context.
@@ -1446,8 +1494,23 @@ fn cmd_init(args: &[String]) -> i32 {
         maybe_install_skill(repo_root);
     }
 
-    eprintln!("\n🔓 Ready. Add secrets by editing the store, then `envstow unlock`.");
-    eprintln!("   Share your public key with collaborators so they can add you.");
+    // Don't claim "Ready" when we just told them they can't decrypt yet. Someone joining a repo
+    // whose store belongs to other people is NOT ready — they're waiting on a recipient. Saying
+    // otherwise (right after two green checkmarks) is what makes the later "No matching keys"
+    // look like a bug rather than the expected next step.
+    if joining_existing {
+        eprintln!(
+            "\n⏳ Almost there — you can't decrypt this store yet. Send your public key to \
+             someone\n\
+             \x20  who already has access:\n\
+             \x20    {public}\n\
+             \x20  They run:  envstow add-recipient {public} <your-name>\n\
+             \x20  Then `git pull` and you're in."
+        );
+    } else {
+        eprintln!("\n🔓 Ready. Add secrets by editing the store, then `envstow unlock`.");
+        eprintln!("   Share your public key with collaborators so they can add you.");
+    }
     0
 }
 
