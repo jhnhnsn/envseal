@@ -1,7 +1,7 @@
-//! envseal crypto core — age (X25519 + ChaCha20-Poly1305) encrypt/decrypt and dotenv parsing.
+//! envstow crypto core — age (X25519 + ChaCha20-Poly1305) encrypt/decrypt and dotenv parsing.
 //!
 //! This module owns all cryptography, delegated to the `age` crate (the reference Rust
-//! implementation). envseal does NOT reimplement the age format or shell out to any external
+//! implementation). envstow does NOT reimplement the age format or shell out to any external
 //! CLI. Everything here operates on in-memory buffers; callers are responsible for zeroizing
 //! plaintext once it is no longer needed.
 //!
@@ -134,7 +134,7 @@ pub fn decrypt_to_text(
 /// Sentinel marking a value stored base64-encoded (used for values that contain newlines,
 /// which the line-based dotenv store can't hold verbatim). Chosen to be extremely unlikely to
 /// collide with a real single-line secret prefix.
-const B64_MARKER: &str = "!envseal:b64!";
+const B64_MARKER: &str = "!envstow:b64!";
 
 /// Encode a value for on-disk storage. Single-line values are stored verbatim (readable in a
 /// `git diff`); values containing a newline are base64-encoded behind [`B64_MARKER`] so the

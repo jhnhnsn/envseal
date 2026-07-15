@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# envseal PostToolUse guard.
+# envstow PostToolUse guard.
 #
 # Reads the Claude Code PostToolUse payload on stdin and blocks the tool result
 # from reaching the model's context if it contains any CURRENT secret value.
@@ -54,7 +54,7 @@ while IFS='=' read -r name value; do
 done < <(env)
 
 if [ "$leaked" -eq 1 ]; then
-  echo "BLOCKED by envseal: command output contained a live secret value; result withheld from context. Do not echo, print, or log secrets — reference them by variable name only." >&2
+  echo "BLOCKED by envstow: command output contained a live secret value; result withheld from context. Do not echo, print, or log secrets — reference them by variable name only." >&2
   exit 2
 fi
 

@@ -38,9 +38,9 @@ jobs:
         shell: pwsh
         working-directory: bin
         run: |
-          $env:ENVSEAL_IDENTITY = Join-Path $env:RUNNER_TEMP 'envseal-id.txt'
+          $env:ENVSTOW_IDENTITY = Join-Path $env:RUNNER_TEMP 'envstow-id.txt'
           # Workspace target dir is at the repo root, one level up from this job's cwd (bin/).
-          $bin = '..\target\release\envseal.exe'
+          $bin = '..\target\release\envstow.exe'
           $expected = 'sk-windows-CI-value'
 
           & $bin init
@@ -54,7 +54,7 @@ jobs:
           if ($got -ne $expected) { throw "round-trip mismatch: got [$got], expected [$expected]" }
 
           # Under an agent, `get` must NOT reveal the value.
-          $env:ENVSEAL_AGENT = '1'
+          $env:ENVSTOW_AGENT = '1'
           $masked = & $bin get OPENAI_API_KEY
           if ($masked -match $expected) { throw 'get leaked the value under an agent' }
 

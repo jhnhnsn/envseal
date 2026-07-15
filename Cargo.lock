@@ -262,8 +262,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "envseal"
-version = "0.1.4"
+name = "envstow"
+version = "0.1.5"
 dependencies = [
  "age",
  "base64",

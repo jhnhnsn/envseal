@@ -1,4 +1,4 @@
-# Workspace root. The envseal binary crate lives in `bin/`; this manifest exists so tooling
+# Workspace root. The envstow binary crate lives in `bin/`; this manifest exists so tooling
 # (cargo-dist / the release pipeline) operates from the repo root, and so future crates can be
 # added as workspace members without restructuring.
 [workspace]

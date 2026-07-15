@@ -1,21 +1,21 @@
-//! End-to-end integration tests driving the real `envseal` binary in isolated temp dirs.
+//! End-to-end integration tests driving the real `envstow` binary in isolated temp dirs.
 //!
 //! These exercise the full lifecycle — init, set, list, unlock round-trip, get masking,
 //! edit, and multi-recipient add/remove — against the compiled binary, so they catch
 //! regressions the in-crate unit tests can't (argument parsing, file layout, process spawn,
 //! the crypto round-trip through the actual store on disk).
 //!
-//! Isolation: each test gets a unique temp directory and its own `ENVSEAL_IDENTITY`, so they
-//! never touch the developer's real `~/.config/envseal`. No `sops`/`age` CLIs are required —
+//! Isolation: each test gets a unique temp directory and its own `ENVSTOW_IDENTITY`, so they
+//! never touch the developer's real `~/.config/envstow`. No `sops`/`age` CLIs are required —
 //! all crypto is compiled into the binary.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-const BIN: &str = env!("CARGO_BIN_EXE_envseal");
+const BIN: &str = env!("CARGO_BIN_EXE_envstow");
 
-/// Every agent-detection marker envseal knows about. Tests must clear ALL of them to simulate a
+/// Every agent-detection marker envstow knows about. Tests must clear ALL of them to simulate a
 /// clean non-agent shell — the test process itself may run under an agent that sets some of them
 /// (e.g. AI_AGENT), which would otherwise make "not under agent" cases mask unexpectedly.
 const AGENT_MARKERS: &[&str] = &[
@@ -29,7 +29,7 @@ const AGENT_MARKERS: &[&str] = &[
     "WINDSURF_AGENT",
     "AI_AGENT",
     "AGENT",
-    "ENVSEAL_AGENT",
+    "ENVSTOW_AGENT",
 ];
 
 /// Strip all agent markers from a Command so the child sees a non-agent environment.
@@ -54,34 +54,34 @@ impl Repo {
     fn new(tag: &str) -> Repo {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
-            std::env::temp_dir().join(format!("envseal-it-{}-{}-{}", tag, std::process::id(), n));
+            std::env::temp_dir().join(format!("envstow-it-{}-{}-{}", tag, std::process::id(), n));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create temp repo");
         let identity = dir.join("identity.txt");
         Repo { dir, identity }
     }
 
-    /// Run `envseal <args...>` in this repo with this identity, feeding `stdin_data` to stdin.
+    /// Run `envstow <args...>` in this repo with this identity, feeding `stdin_data` to stdin.
     fn run(&self, args: &[&str], stdin_data: &str) -> Output {
         use std::io::Write;
         use std::process::Stdio;
         let mut cmd = Command::new(BIN);
         cmd.args(args)
             .current_dir(&self.dir)
-            .env("ENVSEAL_IDENTITY", &self.identity)
+            .env("ENVSTOW_IDENTITY", &self.identity)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         // Ensure a deterministic non-agent, non-tty context unless a test overrides it.
         clear_agent_markers(&mut cmd);
-        let mut child = cmd.spawn().expect("spawn envseal");
+        let mut child = cmd.spawn().expect("spawn envstow");
         child
             .stdin
             .take()
             .unwrap()
             .write_all(stdin_data.as_bytes())
             .unwrap();
-        let out = child.wait_with_output().expect("wait envseal");
+        let out = child.wait_with_output().expect("wait envstow");
         Output {
             code: out.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -89,27 +89,27 @@ impl Repo {
         }
     }
 
-    /// Run with an extra env var set (e.g. ENVSEAL_AGENT=1 or EDITOR).
+    /// Run with an extra env var set (e.g. ENVSTOW_AGENT=1 or EDITOR).
     fn run_env(&self, args: &[&str], stdin_data: &str, key: &str, val: &str) -> Output {
         use std::io::Write;
         use std::process::Stdio;
         let mut cmd = Command::new(BIN);
         cmd.args(args)
             .current_dir(&self.dir)
-            .env("ENVSEAL_IDENTITY", &self.identity)
+            .env("ENVSTOW_IDENTITY", &self.identity)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         clear_agent_markers(&mut cmd);
         cmd.env(key, val); // test-specified var wins (set AFTER clearing)
-        let mut child = cmd.spawn().expect("spawn envseal");
+        let mut child = cmd.spawn().expect("spawn envstow");
         child
             .stdin
             .take()
             .unwrap()
             .write_all(stdin_data.as_bytes())
             .unwrap();
-        let out = child.wait_with_output().expect("wait envseal");
+        let out = child.wait_with_output().expect("wait envstow");
         Output {
             code: out.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -207,14 +207,14 @@ fn init_installs_agent_skill_into_the_repo() {
     let out = repo.run(&["init"], "");
     assert_eq!(out.code, 0, "init failed: {}", out.stderr);
 
-    let skill = repo.dir.join(".claude/skills/envseal/SKILL.md");
+    let skill = repo.dir.join(".claude/skills/envstow/SKILL.md");
     assert!(
         skill.is_file(),
         "init should write the agent skill into the repo"
     );
     let content = std::fs::read_to_string(&skill).unwrap();
     assert!(
-        content.contains("name: envseal"),
+        content.contains("name: envstow"),
         "skill has valid frontmatter"
     );
     assert!(
@@ -230,7 +230,7 @@ fn init_no_skill_flag_skips_the_skill() {
     let out = repo.run(&["init", "--no-skill"], "");
     assert_eq!(out.code, 0, "init --no-skill failed: {}", out.stderr);
     assert!(
-        !repo.dir.join(".claude/skills/envseal/SKILL.md").exists(),
+        !repo.dir.join(".claude/skills/envstow/SKILL.md").exists(),
         "--no-skill must not write the skill"
     );
 }
@@ -238,7 +238,7 @@ fn init_no_skill_flag_skips_the_skill() {
 #[test]
 fn version_flag_prints_crate_version() {
     let repo = Repo::new("version");
-    let expected = format!("envseal {}", env!("CARGO_PKG_VERSION"));
+    let expected = format!("envstow {}", env!("CARGO_PKG_VERSION"));
     // All three spellings work and print the same thing, without needing a repo/identity.
     for form in ["--version", "-V", "version"] {
         let out = repo.run(&[form], "");
@@ -342,7 +342,7 @@ fn get_masks_under_agent_but_reveals_with_show() {
     assert_eq!(repo.run(&["set", "TOKEN"], "topsecretvalue").code, 0);
 
     // Under an agent, bare `get` masks.
-    let masked = repo.run_env(&["get", "TOKEN"], "", "ENVSEAL_AGENT", "1");
+    let masked = repo.run_env(&["get", "TOKEN"], "", "ENVSTOW_AGENT", "1");
     assert_eq!(masked.code, 0);
     assert!(
         !masked.stdout.contains("topsecretvalue"),
@@ -351,7 +351,7 @@ fn get_masks_under_agent_but_reveals_with_show() {
     assert!(masked.stdout.contains("•"), "should print a mask");
 
     // --show overrides even under an agent.
-    let shown = repo.run_env(&["get", "TOKEN", "--show"], "", "ENVSEAL_AGENT", "1");
+    let shown = repo.run_env(&["get", "TOKEN", "--show"], "", "ENVSTOW_AGENT", "1");
     assert_eq!(shown.code, 0);
     assert_eq!(shown.stdout.trim(), "topsecretvalue", "--show must reveal");
 
@@ -396,7 +396,7 @@ fn edit_updates_the_store() {
 
     // The edit temp file must not be left behind.
     assert!(
-        !repo.dir.join(".envseal-edit.tmp").exists(),
+        !repo.dir.join(".envstow-edit.tmp").exists(),
         "edit temp file should be shredded/removed"
     );
 }
@@ -428,7 +428,7 @@ fn add_and_remove_recipient_controls_access() {
             "test \"$SECRET\" = sharedvalue && echo OK",
         ])
         .current_dir(&owner.dir) // owner's store + recipients
-        .env("ENVSEAL_IDENTITY", &collab.identity); // but collaborator's key
+        .env("ENVSTOW_IDENTITY", &collab.identity); // but collaborator's key
     clear_agent_markers(&mut as_collab_cmd);
     let as_collab = as_collab_cmd.output().unwrap();
     assert!(
@@ -450,7 +450,7 @@ fn add_and_remove_recipient_controls_access() {
     after_cmd
         .args(["unlock", "--", "true"])
         .current_dir(&owner.dir)
-        .env("ENVSEAL_IDENTITY", &collab.identity);
+        .env("ENVSTOW_IDENTITY", &collab.identity);
     clear_agent_markers(&mut after_cmd);
     let after = after_cmd.output().unwrap();
     assert_ne!(

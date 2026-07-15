@@ -1,17 +1,17 @@
-//! envseal — an age-encrypted key-value store committed to the repo, decrypted with each user's
+//! envstow — an age-encrypted key-value store committed to the repo, decrypted with each user's
 //! own age key, surfaced by NAME so neither a human nor an agent has to paste a literal secret
 //! value onto a command line.
 //!
 //! Commands:
-//!   envseal get <NAME> [--show]     Resolve one secret by name (masked under an agent).
-//!   envseal unlock [-- <cmd>...]    Spawn a subshell / run a command with the whole env set.
-//!   envseal init                    Generate an identity, add self as recipient, create store.
-//!   envseal pubkey                  Print your age public key (share it to be added).
-//!   envseal add-recipient <age1..>  Add a recipient and re-encrypt the store.
-//!   envseal remove-recipient <k|nm> Remove a recipient and re-encrypt (then rotate!).
-//!   envseal reencrypt               Re-encrypt the store to the current recipients file.
-//!   envseal --version               Print the version.
-//!   envseal -h | --help
+//!   envstow get <NAME> [--show]     Resolve one secret by name (masked under an agent).
+//!   envstow unlock [-- <cmd>...]    Spawn a subshell / run a command with the whole env set.
+//!   envstow init                    Generate an identity, add self as recipient, create store.
+//!   envstow pubkey                  Print your age public key (share it to be added).
+//!   envstow add-recipient <age1..>  Add a recipient and re-encrypt the store.
+//!   envstow remove-recipient <k|nm> Remove a recipient and re-encrypt (then rotate!).
+//!   envstow reencrypt               Re-encrypt the store to the current recipients file.
+//!   envstow --version               Print the version.
+//!   envstow -h | --help
 //!
 //! Design notes:
 //!   * All crypto is the `age` crate (see `crypto`). No external CLI is invoked.
@@ -41,7 +41,7 @@ fn main() {
             0
         }
         Some("-V") | Some("--version") | Some("version") => {
-            println!("envseal {}", env!("CARGO_PKG_VERSION"));
+            println!("envstow {}", env!("CARGO_PKG_VERSION"));
             0
         }
         None => {
@@ -59,7 +59,7 @@ fn main() {
         Some("remove-recipient") => cmd_remove_recipient(&args[1..]),
         Some("reencrypt") => cmd_reencrypt(),
         Some(other) => {
-            eprintln!("envseal: unknown command '{other}'\n");
+            eprintln!("envstow: unknown command '{other}'\n");
             print_help();
             2
         }
@@ -112,7 +112,7 @@ const AGENT_ENV_MARKERS: &[&str] = &[
     // Generic / cross-tool conventions + explicit opt-in
     "AI_AGENT",
     "AGENT",
-    "ENVSEAL_AGENT",
+    "ENVSTOW_AGENT",
 ];
 
 /// Are we very likely running under an agent that captures our stdout into its context?
@@ -145,7 +145,7 @@ fn masked_preview(value: &str) -> String {
 // get
 // ---------------------------------------------------------------------------
 
-/// `envseal get <NAME> [--show]` — resolve one secret by name with guarded output.
+/// `envstow get <NAME> [--show]` — resolve one secret by name with guarded output.
 ///
 /// Masking policy (see DESIGN.md):
 ///   * `--show` given → always print the raw value (explicit request).
@@ -160,12 +160,12 @@ fn cmd_get(args: &[String]) -> i32 {
         match a.as_str() {
             "--show" => show = true,
             s if s.starts_with('-') => {
-                eprintln!("envseal get: unknown flag '{s}'");
+                eprintln!("envstow get: unknown flag '{s}'");
                 return 2;
             }
             s => {
                 if name.is_some() {
-                    eprintln!("envseal get: expected a single NAME");
+                    eprintln!("envstow get: expected a single NAME");
                     return 2;
                 }
                 name = Some(s);
@@ -173,14 +173,14 @@ fn cmd_get(args: &[String]) -> i32 {
         }
     }
     let Some(name) = name else {
-        eprintln!("envseal get: usage: envseal get <NAME> [--show]");
+        eprintln!("envstow get: usage: envstow get <NAME> [--show]");
         return 2;
     };
 
     let mut vars = match load_secrets() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
@@ -192,7 +192,7 @@ fn cmd_get(args: &[String]) -> i32 {
     }
 
     let Some(mut value) = found else {
-        eprintln!("envseal: no secret named '{name}'");
+        eprintln!("envstow: no secret named '{name}'");
         return 1;
     };
 
@@ -208,8 +208,8 @@ fn cmd_get(args: &[String]) -> i32 {
         // Masked: tell the human/agent how to reveal, without leaking the value.
         println!("{}", mask(&value));
         eprintln!(
-            "envseal: value masked (running under an agent or a terminal). \
-             Use it by name via `envseal unlock -- <cmd using ${name}>`, \
+            "envstow: value masked (running under an agent or a terminal). \
+             Use it by name via `envstow unlock -- <cmd using ${name}>`, \
              or pass --show to reveal."
         );
     }
@@ -221,24 +221,24 @@ fn cmd_get(args: &[String]) -> i32 {
 // set / list
 // ---------------------------------------------------------------------------
 
-/// `envseal set <NAME>` — read a value from STDIN (never argv) and store it under NAME,
+/// `envstow set <NAME>` — read a value from STDIN (never argv) and store it under NAME,
 /// re-encrypting the store. Reading from stdin keeps the literal value off the command line.
 fn cmd_set(args: &[String]) -> i32 {
     let Some(name) = args.first() else {
         eprintln!(
-            "envseal set: usage: envseal set <NAME>   (then type the value + Enter, \
-             or pipe it: `printf '%s' value | envseal set <NAME>`)"
+            "envstow set: usage: envstow set <NAME>   (then type the value + Enter, \
+             or pipe it: `printf '%s' value | envstow set <NAME>`)"
         );
         return 2;
     };
     if name.contains('=') || name.trim().is_empty() {
-        eprintln!("envseal set: NAME must be non-empty and contain no '='.");
+        eprintln!("envstow set: NAME must be non-empty and contain no '='.");
         return 2;
     }
 
     // Read the value from stdin. Two modes:
     //   * interactive TTY (you typing): prompt, then read ONE line — finishes on Enter.
-    //   * piped (`printf … | envseal set`): read ALL of stdin, so multi-line values survive.
+    //   * piped (`printf … | envstow set`): read ALL of stdin, so multi-line values survive.
     // Either way the value never appears on the command line.
     let mut value = String::new();
     let read = if io::stdin().is_terminal() {
@@ -249,7 +249,7 @@ fn cmd_set(args: &[String]) -> i32 {
         io::stdin().read_to_string(&mut value)
     };
     if read.is_err() {
-        eprintln!("envseal set: could not read value from stdin.");
+        eprintln!("envstow set: could not read value from stdin.");
         return 1;
     }
     // Trim a single trailing newline (the Enter keystroke, or a trailing newline from `echo`).
@@ -263,7 +263,7 @@ fn cmd_set(args: &[String]) -> i32 {
     let paths = match layout::locate() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             value.zeroize();
             return 1;
         }
@@ -271,7 +271,7 @@ fn cmd_set(args: &[String]) -> i32 {
     let mut vars = match load_secrets() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             value.zeroize();
             return 1;
         }
@@ -303,12 +303,12 @@ fn cmd_set(args: &[String]) -> i32 {
     code
 }
 
-/// `envseal list` — print the variable NAMES in the store (never values).
+/// `envstow list` — print the variable NAMES in the store (never values).
 fn cmd_list() -> i32 {
     let mut vars = match load_secrets() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
@@ -321,14 +321,14 @@ fn cmd_list() -> i32 {
     0
 }
 
-/// `envseal pubkey` — print YOUR age public key (derived from your identity), so you can share
+/// `envstow pubkey` — print YOUR age public key (derived from your identity), so you can share
 /// it with a collaborator who will `add-recipient` it. The public key is not a secret; it is
 /// always safe to print, even under an agent.
 fn cmd_pubkey() -> i32 {
     let secret = match layout::read_identity_secret() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
@@ -338,7 +338,7 @@ fn cmd_pubkey() -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("envseal: identity is unreadable: {e}");
+            eprintln!("envstow: identity is unreadable: {e}");
             1
         }
     }
@@ -349,13 +349,13 @@ fn cmd_pubkey() -> i32 {
 fn write_secrets(recipients_path: &Path, store: &Path, vars: &mut [(String, String)]) -> i32 {
     let recipients = layout::read_recipients(recipients_path).unwrap_or_default();
     if recipients.is_empty() {
-        eprintln!("envseal: no recipients — cannot encrypt.");
+        eprintln!("envstow: no recipients — cannot encrypt.");
         return 1;
     }
     let recips = match parse_all_recipients(&recipients) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
@@ -374,25 +374,25 @@ fn write_secrets(recipients_path: &Path, store: &Path, vars: &mut [(String, Stri
         Ok(ct) => match layout::write_store(store, &ct) {
             Ok(()) => 0,
             Err(e) => {
-                eprintln!("envseal: could not write store: {e}");
+                eprintln!("envstow: could not write store: {e}");
                 1
             }
         },
         Err(e) => {
-            eprintln!("envseal: encryption failed: {e}");
+            eprintln!("envstow: encryption failed: {e}");
             1
         }
     }
 }
 
-/// `envseal edit` — decrypt the store to a private temp file, open `$EDITOR` on it, then
+/// `envstow edit` — decrypt the store to a private temp file, open `$EDITOR` on it, then
 /// re-encrypt the edited dotenv back to the store. The plaintext temp file is created 0600 in
 /// the user's config dir, overwritten with zeros, and removed on exit (success or failure).
 fn cmd_edit() -> i32 {
     let paths = match layout::locate() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
@@ -400,7 +400,7 @@ fn cmd_edit() -> i32 {
     let mut vars = match load_secrets() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
@@ -413,13 +413,13 @@ fn cmd_edit() -> i32 {
     let tmp = layout::identity_path()
         .parent()
         .unwrap_or(Path::new("."))
-        .join(".envseal-edit.tmp");
+        .join(".envstow-edit.tmp");
     if let Some(parent) = tmp.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Err(e) = write_private_file(&tmp, initial.as_bytes()) {
         initial.zeroize();
-        eprintln!("envseal: could not create temp file: {e}");
+        eprintln!("envstow: could not create temp file: {e}");
         return 1;
     }
     initial.zeroize();
@@ -440,18 +440,18 @@ fn cmd_edit() -> i32 {
                     write_secrets(&paths.recipients, &paths.store, &mut new_vars)
                 }
                 Err(e) => {
-                    eprintln!("envseal: could not read edited file: {e}");
+                    eprintln!("envstow: could not read edited file: {e}");
                     1
                 }
             }
         }
         Ok(_) => {
-            eprintln!("envseal: editor exited non-zero — store left unchanged.");
+            eprintln!("envstow: editor exited non-zero — store left unchanged.");
             1
         }
         Err(e) => {
             eprintln!(
-                "envseal: could not launch editor '{}': {e}",
+                "envstow: could not launch editor '{}': {e}",
                 editor.to_string_lossy()
             );
             1
@@ -509,7 +509,7 @@ fn shred_and_remove(path: &Path) {
 // unlock
 // ---------------------------------------------------------------------------
 
-/// `envseal unlock [-- <cmd>...]` — decrypt the whole store and set every value as an env var
+/// `envstow unlock [-- <cmd>...]` — decrypt the whole store and set every value as an env var
 /// for a spawned child (an interactive subshell, or the given command). Values never printed;
 /// only variable NAMES are listed.
 fn cmd_unlock(args: &[String]) -> i32 {
@@ -522,18 +522,18 @@ fn cmd_unlock(args: &[String]) -> i32 {
     let vars = match load_secrets() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
     if vars.is_empty() {
-        eprintln!("envseal: store decrypted but contains no variables.");
+        eprintln!("envstow: store decrypted but contains no variables.");
         return 1;
     }
 
     let names: Vec<&str> = vars.iter().map(|(k, _)| k.as_str()).collect();
     eprintln!(
-        "🔓 envseal: loaded {} secret(s): {}",
+        "🔓 envstow: loaded {} secret(s): {}",
         names.len(),
         names.join(", ")
     );
@@ -546,7 +546,11 @@ fn cmd_unlock(args: &[String]) -> i32 {
 fn spawn_with_env(cmd: &[String], mut vars: Vec<(String, String)>) -> i32 {
     let (program, args, interactive) = if cmd.is_empty() {
         let (sh, sh_args) = default_shell();
-        eprintln!("🔓 envseal: launching unlocked subshell. Type `exit` to lock.");
+        eprintln!("🔓 envstow: launching unlocked subshell. Type `exit` to lock.");
+        // Mark the terminal title so it's obvious this window holds unlocked secrets. Plain
+        // ASCII (no emoji) for terminal compatibility; OSC 0 sets both icon + window title.
+        // Best-effort: some prompt frameworks re-set the title per command and may override it.
+        set_terminal_title("[envstow:unlocked]");
         (sh, sh_args, true)
     } else {
         (
@@ -561,7 +565,7 @@ fn spawn_with_env(cmd: &[String], mut vars: Vec<(String, String)>) -> i32 {
     for (k, v) in &vars {
         command.env(k, v);
     }
-    command.env("ENVSEAL_UNLOCKED", "1");
+    command.env("ENVSTOW_UNLOCKED", "1");
     command
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
@@ -574,21 +578,38 @@ fn spawn_with_env(cmd: &[String], mut vars: Vec<(String, String)>) -> i32 {
         v.zeroize();
     }
 
-    match result {
+    let code = match result {
         Ok(mut child) => match child.wait() {
             Ok(status) => status.code().unwrap_or(if interactive { 0 } else { 1 }),
             Err(e) => {
-                eprintln!("envseal: error waiting for child: {e}");
+                eprintln!("envstow: error waiting for child: {e}");
                 1
             }
         },
         Err(e) => {
             eprintln!(
-                "envseal: failed to launch '{}': {e}",
+                "envstow: failed to launch '{}': {e}",
                 program.to_string_lossy()
             );
             127
         }
+    };
+
+    // Clear the "[envstow:unlocked]" title we set for the subshell, on the way out.
+    if interactive {
+        set_terminal_title("");
+    }
+    code
+}
+
+/// Set the terminal window/icon title via OSC escape sequence (works across terminals and is
+/// independent of the prompt framework). Only emits when stderr is a real terminal, so it never
+/// corrupts piped output. Passing an empty string clears the title.
+fn set_terminal_title(title: &str) {
+    if io::stderr().is_terminal() {
+        // OSC 0 ; <title> BEL — sets both icon name and window title.
+        eprint!("\x1b]0;{title}\x07");
+        let _ = io::stderr().flush();
     }
 }
 
@@ -611,7 +632,7 @@ fn default_shell() -> (OsString, Vec<OsString>) {
 // init
 // ---------------------------------------------------------------------------
 
-/// `envseal init` — generate an age identity (if none), create the `recipients` file with the
+/// `envstow init` — generate an age identity (if none), create the `recipients` file with the
 /// user as sole recipient (if none), and create an empty encrypted store (if none). Idempotent.
 /// Also offers to add the Claude Code agent skill to this repo (`--no-skill` to skip).
 fn cmd_init(args: &[String]) -> i32 {
@@ -628,7 +649,7 @@ fn cmd_init(args: &[String]) -> i32 {
                 p
             }
             Err(e) => {
-                eprintln!("envseal: existing identity is unreadable: {e}");
+                eprintln!("envstow: existing identity is unreadable: {e}");
                 return 1;
             }
         },
@@ -638,7 +659,7 @@ fn cmd_init(args: &[String]) -> i32 {
                 Ok(path) => eprintln!("✔  generated identity at {}", path.display()),
                 Err(e) => {
                     secret.zeroize();
-                    eprintln!("envseal: could not write identity: {e}");
+                    eprintln!("envstow: could not write identity: {e}");
                     return 1;
                 }
             }
@@ -664,12 +685,12 @@ fn cmd_init(args: &[String]) -> i32 {
         if joining_existing {
             // A store already exists, encrypted to OTHER people. We add ourselves to the
             // recipients list, but the on-disk store can't be re-keyed to include us until
-            // an EXISTING recipient runs `envseal reencrypt`. Adding our key alone does not
+            // an EXISTING recipient runs `envstow reencrypt`. Adding our key alone does not
             // grant us decryption — say so plainly rather than leaving a broken state.
             eprintln!(
                 "⚠️  {} already lists {} other recipient(s). Adding your key here does NOT let\n\
                  \x20   you decrypt the existing store — ask an existing recipient to run\n\
-                 \x20   `envseal reencrypt` after pulling your key.",
+                 \x20   `envstow reencrypt` after pulling your key.",
                 recipients_path.display(),
                 recipients.len()
             );
@@ -679,7 +700,7 @@ fn cmd_init(args: &[String]) -> i32 {
             label: Some("me".to_string()),
         });
         if let Err(e) = std::fs::write(&recipients_path, layout::render_recipients(&recipients)) {
-            eprintln!("envseal: could not write recipients file: {e}");
+            eprintln!("envstow: could not write recipients file: {e}");
             return 1;
         }
         eprintln!("✔  added you to {}", recipients_path.display());
@@ -693,17 +714,17 @@ fn cmd_init(args: &[String]) -> i32 {
     if store_path.is_file() {
         eprintln!("✔  store already exists at {}", store_path.display());
     } else {
-        let seed = b"# envseal secrets -- KEY=value lines. Edit via `envseal unlock`.\n";
+        let seed = b"# envstow secrets -- KEY=value lines. Edit via `envstow unlock`.\n";
         match encrypt_payload(seed, &recipients) {
             Ok(ct) => {
                 if let Err(e) = layout::write_store(&store_path, &ct) {
-                    eprintln!("envseal: could not write store: {e}");
+                    eprintln!("envstow: could not write store: {e}");
                     return 1;
                 }
                 eprintln!("✔  created empty store at {}", store_path.display());
             }
             Err(e) => {
-                eprintln!("envseal: could not encrypt initial store: {e}");
+                eprintln!("envstow: could not encrypt initial store: {e}");
                 return 1;
             }
         }
@@ -716,23 +737,23 @@ fn cmd_init(args: &[String]) -> i32 {
         maybe_install_skill(repo_root);
     }
 
-    eprintln!("\n🔓 Ready. Add secrets by editing the store, then `envseal unlock`.");
+    eprintln!("\n🔓 Ready. Add secrets by editing the store, then `envstow unlock`.");
     eprintln!("   Share your public key with collaborators so they can add you.");
     0
 }
 
 /// The agent skill content, embedded at compile time so the binary can write it into any repo
-/// (a consuming repo has no copy of the source file). Kept in sync with `agent/envseal-skill.md`.
-const AGENT_SKILL: &str = include_str!("../../agent/envseal-skill.md");
+/// (a consuming repo has no copy of the source file). Kept in sync with `agent/envstow-skill.md`.
+const AGENT_SKILL: &str = include_str!("../../agent/envstow-skill.md");
 
-/// Offer to write the Claude Code agent skill into `<repo>/.claude/skills/envseal/SKILL.md`.
+/// Offer to write the Claude Code agent skill into `<repo>/.claude/skills/envstow/SKILL.md`.
 /// Prompts `[Y/n]` on a TTY (default yes); on a non-TTY (CI) it installs without prompting.
 /// Writing it into the repo means it gets committed and travels to teammates who clone.
 fn maybe_install_skill(repo_root: &Path) {
     let dest = repo_root
         .join(".claude")
         .join("skills")
-        .join("envseal")
+        .join("envstow")
         .join("SKILL.md");
 
     let existed = dest.is_file();
@@ -757,7 +778,7 @@ fn maybe_install_skill(repo_root: &Path) {
 
     if let Some(parent) = dest.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!("envseal: could not create {}: {e}", parent.display());
+            eprintln!("envstow: could not create {}: {e}", parent.display());
             return;
         }
     }
@@ -765,9 +786,9 @@ fn maybe_install_skill(repo_root: &Path) {
         Ok(()) => {
             let verb = if existed { "updated" } else { "added" };
             eprintln!("✔  {verb} agent skill at {}", dest.display());
-            eprintln!("   commit `.claude/skills/envseal/` so teammates get it on clone.");
+            eprintln!("   commit `.claude/skills/envstow/` so teammates get it on clone.");
         }
-        Err(e) => eprintln!("envseal: could not write agent skill: {e}"),
+        Err(e) => eprintln!("envstow: could not write agent skill: {e}"),
     }
 }
 
@@ -777,11 +798,11 @@ fn maybe_install_skill(repo_root: &Path) {
 
 fn cmd_add_recipient(args: &[String]) -> i32 {
     let Some(key) = args.first() else {
-        eprintln!("envseal add-recipient: usage: envseal add-recipient <age1...> [label]");
+        eprintln!("envstow add-recipient: usage: envstow add-recipient <age1...> [label]");
         return 2;
     };
     if crypto::parse_recipient(key).is_err() {
-        eprintln!("envseal: '{key}' is not a valid age public key (expected age1...).");
+        eprintln!("envstow: '{key}' is not a valid age public key (expected age1...).");
         return 1;
     }
     let label = args.get(1).cloned();
@@ -789,13 +810,13 @@ fn cmd_add_recipient(args: &[String]) -> i32 {
     let paths = match layout::locate() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
     let mut recipients = layout::read_recipients(&paths.recipients).unwrap_or_default();
     if recipients.iter().any(|r| &r.key == key) {
-        eprintln!("envseal: {key} is already a recipient.");
+        eprintln!("envstow: {key} is already a recipient.");
         return 0;
     }
     recipients.push(Recipient {
@@ -804,7 +825,7 @@ fn cmd_add_recipient(args: &[String]) -> i32 {
     });
 
     if let Err(e) = std::fs::write(&paths.recipients, layout::render_recipients(&recipients)) {
-        eprintln!("envseal: could not update recipients file: {e}");
+        eprintln!("envstow: could not update recipients file: {e}");
         return 1;
     }
     eprintln!("✔  added recipient to {}", paths.recipients.display());
@@ -813,14 +834,14 @@ fn cmd_add_recipient(args: &[String]) -> i32 {
 
 fn cmd_remove_recipient(args: &[String]) -> i32 {
     let Some(target) = args.first() else {
-        eprintln!("envseal remove-recipient: usage: envseal remove-recipient <age1...|label>");
+        eprintln!("envstow remove-recipient: usage: envstow remove-recipient <age1...|label>");
         return 2;
     };
 
     let paths = match layout::locate() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
@@ -831,12 +852,12 @@ fn cmd_remove_recipient(args: &[String]) -> i32 {
         .filter(|r| &r.key == target || r.label.as_deref() == Some(target.as_str()))
         .collect();
     if matches.is_empty() {
-        eprintln!("envseal: no recipient matching '{target}'.");
+        eprintln!("envstow: no recipient matching '{target}'.");
         return 1;
     }
     if matches.len() > 1 {
         eprintln!(
-            "envseal: '{target}' matches {} recipients — pass the exact age key.",
+            "envstow: '{target}' matches {} recipients — pass the exact age key.",
             matches.len()
         );
         return 1;
@@ -847,12 +868,12 @@ fn cmd_remove_recipient(args: &[String]) -> i32 {
         .filter(|r| r.key != removed_key)
         .collect();
     if kept.is_empty() {
-        eprintln!("envseal: refusing to remove the last recipient (store would be unreadable).");
+        eprintln!("envstow: refusing to remove the last recipient (store would be unreadable).");
         return 1;
     }
 
     if let Err(e) = std::fs::write(&paths.recipients, layout::render_recipients(&kept)) {
-        eprintln!("envseal: could not update recipients file: {e}");
+        eprintln!("envstow: could not update recipients file: {e}");
         return 1;
     }
     eprintln!("✔  removed recipient; {} remain.", kept.len());
@@ -871,13 +892,13 @@ fn cmd_reencrypt() -> i32 {
     let paths = match layout::locate() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
     let recipients = layout::read_recipients(&paths.recipients).unwrap_or_default();
     if recipients.is_empty() {
-        eprintln!("envseal: recipients file has no keys.");
+        eprintln!("envstow: recipients file has no keys.");
         return 1;
     }
     reencrypt_store(&paths.store, &recipients)
@@ -889,28 +910,28 @@ fn reencrypt_store(store: &Path, recipients: &[Recipient]) -> i32 {
     let secret = match layout::read_identity_secret() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
     let identity = match crypto::parse_identity(&secret) {
         Ok(i) => i,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
     let ciphertext = match layout::read_store(store) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
     let mut plaintext = match crypto::decrypt(&ciphertext, &identity) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
@@ -919,7 +940,7 @@ fn reencrypt_store(store: &Path, recipients: &[Recipient]) -> i32 {
         Ok(r) => r,
         Err(e) => {
             plaintext.zeroize();
-            eprintln!("envseal: {e}");
+            eprintln!("envstow: {e}");
             return 1;
         }
     };
@@ -929,14 +950,14 @@ fn reencrypt_store(store: &Path, recipients: &[Recipient]) -> i32 {
     match result {
         Ok(ct) => {
             if let Err(e) = layout::write_store(store, &ct) {
-                eprintln!("envseal: could not write store: {e}");
+                eprintln!("envstow: could not write store: {e}");
                 return 1;
             }
             eprintln!("✔  re-encrypted store to {} recipient(s).", recips.len());
             0
         }
         Err(e) => {
-            eprintln!("envseal: re-encryption failed: {e}");
+            eprintln!("envstow: re-encryption failed: {e}");
             1
         }
     }
@@ -994,25 +1015,25 @@ fn parse_all_recipients(recipients: &[Recipient]) -> Result<Vec<age::x25519::Rec
 
 fn print_help() {
     eprintln!(
-        "envseal — a local, encrypted key-value store (age) surfaced by NAME\n\
+        "envstow — a local, encrypted key-value store (age) surfaced by NAME\n\
          \n\
          USAGE:\n\
-         \x20 envseal get <NAME> [--show]      Resolve one secret (masked under an agent).\n\
-         \x20 envseal set <NAME>               Read a value from stdin and store it.\n\
-         \x20 envseal edit                     Edit all secrets in $EDITOR (decrypt/re-encrypt).\n\
-         \x20 envseal list                     List secret NAMES (never values).\n\
-         \x20 envseal pubkey                   Print your age PUBLIC key (share it to be added).\n\
-         \x20 envseal unlock [-- <cmd>...]     Subshell / run a command with the whole env set.\n\
-         \x20 envseal init [--no-skill]        Create identity + recipients + store; add agent skill.\n\
-         \x20 envseal add-recipient <age1..>   Add a collaborator and re-encrypt.\n\
-         \x20 envseal remove-recipient <k|nm>  Remove a collaborator and re-encrypt (then rotate).\n\
-         \x20 envseal reencrypt                Re-encrypt the store to the current recipients.\n\
-         \x20 envseal --version                Print the envseal version.\n\
+         \x20 envstow get <NAME> [--show]      Resolve one secret (masked under an agent).\n\
+         \x20 envstow set <NAME>               Read a value from stdin and store it.\n\
+         \x20 envstow edit                     Edit all secrets in $EDITOR (decrypt/re-encrypt).\n\
+         \x20 envstow list                     List secret NAMES (never values).\n\
+         \x20 envstow pubkey                   Print your age PUBLIC key (share it to be added).\n\
+         \x20 envstow unlock [-- <cmd>...]     Subshell / run a command with the whole env set.\n\
+         \x20 envstow init [--no-skill]        Create identity + recipients + store; add agent skill.\n\
+         \x20 envstow add-recipient <age1..>   Add a collaborator and re-encrypt.\n\
+         \x20 envstow remove-recipient <k|nm>  Remove a collaborator and re-encrypt (then rotate).\n\
+         \x20 envstow reencrypt                Re-encrypt the store to the current recipients.\n\
+         \x20 envstow --version                Print the envstow version.\n\
          \n\
          EXAMPLES:\n\
-         \x20 do-thing \"$(envseal get DB_PASSWORD)\"   # by name; masked if an agent runs it bare\n\
-         \x20 envseal unlock -- npm run build          # run one command with all secrets set\n\
-         \x20 envseal unlock                           # start your AI in an unlocked subshell\n\
+         \x20 do-thing \"$(envstow get DB_PASSWORD)\"   # by name; masked if an agent runs it bare\n\
+         \x20 envstow unlock -- npm run build          # run one command with all secrets set\n\
+         \x20 envstow unlock                           # start your AI in an unlocked subshell\n\
          \n\
          All crypto is the `age` crate — no external tools. Values are never printed unless\n\
          output is safe or you pass --show."

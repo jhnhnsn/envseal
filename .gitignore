@@ -1,7 +1,7 @@
 # Never commit plaintext secrets or private keys.
-# This is the envseal tool's OWN repo — it does not carry a real secret store. If you dogfood
-# envseal here (`envseal init`), the generated store/recipients are ignored so they aren't
-# committed. (In a normal project that USES envseal, you DO commit recipients + secrets.enc.)
+# This is the envstow tool's OWN repo — it does not carry a real secret store. If you dogfood
+# envstow here (`envstow init`), the generated store/recipients are ignored so they aren't
+# committed. (In a normal project that USES envstow, you DO commit recipients + secrets.enc.)
 /recipients
 /secrets/
 
@@ -12,7 +12,7 @@
 .env.*
 !.env.example
 
-# age private keys / identities (envseal keeps yours in ~/.config/envseal/identity.txt,
+# age private keys / identities (envstow keeps yours in ~/.config/envstow/identity.txt,
 # but guard against a stray copy landing in the repo).
 identity.txt
 keys.txt
@@ -20,8 +20,8 @@ keys.txt
 *.age.key
 *.agekey
 
-# envseal edit temp file (should be shredded, but never commit it)
-.envseal-edit.tmp
+# envstow edit temp file (should be shredded, but never commit it)
+.envstow-edit.tmp
 
 # Rust build output. With the workspace root Cargo.toml, output lands in ./target;
 # bin/target is kept ignored too in case the crate is built in isolation.

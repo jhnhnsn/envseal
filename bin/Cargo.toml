@@ -1,13 +1,13 @@
 [package]
-name = "envseal"
-version = "0.1.4"
+name = "envstow"
+version = "0.1.5"
 edition = "2021"
 description = "An age-encrypted key-value secret store, committed to your repo and surfaced by name."
 license = "MIT"
-repository = "https://github.com/jhnhnsn/envseal"
+repository = "https://github.com/jhnhnsn/envstow"
 
 [[bin]]
-name = "envseal"
+name = "envstow"
 path = "src/main.rs"
 
 [dependencies]

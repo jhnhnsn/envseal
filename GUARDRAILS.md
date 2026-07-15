@@ -1,12 +1,12 @@
-# envseal — AI agent guardrails setup
+# envstow — AI agent guardrails setup
 
-> **Canonical source:** https://github.com/jhnhnsn/envseal/blob/main/GUARDRAILS.md
+> **Canonical source:** https://github.com/jhnhnsn/envstow/blob/main/GUARDRAILS.md
 > A human *or an AI agent* can fetch this page and follow it to harden a repo. If you're an
-> agent asked to "set up envseal guardrails," read this file and apply the steps for the
+> agent asked to "set up envstow guardrails," read this file and apply the steps for the
 > agent/editor in use.
 
-envseal keeps secrets encrypted and lets programs use them **by name**. That already keeps a
-value out of your transcript when you run `envseal unlock -- <cmd>`. These guardrails add
+envstow keeps secrets encrypted and lets programs use them **by name**. That already keeps a
+value out of your transcript when you run `envstow unlock -- <cmd>`. These guardrails add
 *defense in depth* so an agent is steered away from — and mechanically blocked from —
 accidentally exposing a secret value.
 
@@ -18,11 +18,11 @@ three; other agents support layers 1 and (via their own hook system) 3.
 ## Layer 1 — Instructions (works with every agent)
 
 Tell the agent the rules: reference secrets by name, never print/echo/log a value, use
-`envseal unlock -- <cmd>`. Where these live depends on the agent:
+`envstow unlock -- <cmd>`. Where these live depends on the agent:
 
 | Agent | Put the rules in |
 |---|---|
-| **Claude Code** | `CLAUDE.md`, and/or the envseal skill (see below) |
+| **Claude Code** | `CLAUDE.md`, and/or the envstow skill (see below) |
 | **Cursor** | `.cursorrules` (or `.cursor/rules/*.mdc`) |
 | **Aider** | `CONVENTIONS.md` (referenced in `.aider.conf.yml`) |
 | **Windsurf / others** | their project-rules file |
@@ -31,31 +31,31 @@ Tell the agent the rules: reference secrets by name, never print/echo/log a valu
 Minimum text to include (adapt wording to the file):
 
 ```markdown
-## Secret handling (envseal)
-- Secrets are managed by envseal and referenced BY NAME (e.g. $MY_SUPER_SECRET_KEY).
+## Secret handling (envstow)
+- Secrets are managed by envstow and referenced BY NAME (e.g. $MY_SUPER_SECRET_KEY).
 - Never print, echo, log, or paste a secret VALUE. Never run `env`, `printenv`,
   `echo $SOME_SECRET`, or `cat` a file that holds one.
-- To use a secret in a command, run it through envseal so the value stays in the child
-  process: `envseal unlock -- sh -c 'deploy --token "$MY_SUPER_SECRET_KEY"'`.
-- `envseal get <NAME>` masks its output under an agent — that is intentional; do not try to
-  defeat it. If a human needs a value, they run `envseal get <NAME> --show` themselves.
+- To use a secret in a command, run it through envstow so the value stays in the child
+  process: `envstow unlock -- sh -c 'deploy --token "$MY_SUPER_SECRET_KEY"'`.
+- `envstow get <NAME>` masks its output under an agent — that is intentional; do not try to
+  defeat it. If a human needs a value, they run `envstow get <NAME> --show` themselves.
 - If you think you need a plaintext value, STOP and ask the human.
 ```
 
-For Claude Code, **`envseal init` already offers to install the skill** into this repo's
-`.claude/skills/envseal/` — commit it and it travels to teammates on clone. To (re)install it
+For Claude Code, **`envstow init` already offers to install the skill** into this repo's
+`.claude/skills/envstow/` — commit it and it travels to teammates on clone. To (re)install it
 manually, or install it globally so it loads in every repo you work in:
 
 ```bash
 # Per-project (what `init` does; travels to teammates):
-mkdir -p .claude/skills/envseal
-curl -fsSL https://raw.githubusercontent.com/jhnhnsn/envseal/main/agent/envseal-skill.md \
-  -o .claude/skills/envseal/SKILL.md
+mkdir -p .claude/skills/envstow
+curl -fsSL https://raw.githubusercontent.com/jhnhnsn/envstow/main/agent/envstow-skill.md \
+  -o .claude/skills/envstow/SKILL.md
 
 # …or global (available in all YOUR repos; doesn't travel to teammates):
-mkdir -p ~/.claude/skills/envseal
-curl -fsSL https://raw.githubusercontent.com/jhnhnsn/envseal/main/agent/envseal-skill.md \
-  -o ~/.claude/skills/envseal/SKILL.md
+mkdir -p ~/.claude/skills/envstow
+curl -fsSL https://raw.githubusercontent.com/jhnhnsn/envstow/main/agent/envstow-skill.md \
+  -o ~/.claude/skills/envstow/SKILL.md
 ```
 
 Restart Claude Code afterward — skills load at startup.

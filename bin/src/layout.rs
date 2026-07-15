@@ -1,10 +1,10 @@
-//! envseal file & key layout — where the identity, recipients, and encrypted store live,
+//! envstow file & key layout — where the identity, recipients, and encrypted store live,
 //! and how they are located, read, and written.
 //!
 //! Locations
 //! ---------
-//!   * Identity (PRIVATE key): `$ENVSEAL_IDENTITY`, else `~/.config/envseal/identity.txt`
-//!     (`%APPDATA%\envseal\identity.txt` on Windows). Contains one `AGE-SECRET-KEY-...` line.
+//!   * Identity (PRIVATE key): `$ENVSTOW_IDENTITY`, else `~/.config/envstow/identity.txt`
+//!     (`%APPDATA%\envstow\identity.txt` on Windows). Contains one `AGE-SECRET-KEY-...` line.
 //!     Never committed; created mode 0600 on Unix.
 //!   * Recipients (PUBLIC keys): `recipients` at the repo root. Committed. One `age1...` per
 //!     line; `#` comments and optional trailing `# Name` allowed. This is the recipient set
@@ -45,7 +45,7 @@ impl std::fmt::Display for LayoutError {
             LayoutError::NoRecipientsFile => write!(
                 f,
                 "no `{RECIPIENTS_FILE}` file found in this directory or any parent \
-                 (run `envseal init` first)"
+                 (run `envstow init` first)"
             ),
             LayoutError::NoStore => {
                 write!(f, "no `{STORE_FILE}` found next to `{RECIPIENTS_FILE}`")
@@ -53,7 +53,7 @@ impl std::fmt::Display for LayoutError {
             LayoutError::Io(e) => write!(f, "{e}"),
             LayoutError::NoIdentity(p) => write!(
                 f,
-                "no identity (private key) at {} — run `envseal init` or set $ENVSEAL_IDENTITY",
+                "no identity (private key) at {} — run `envstow init` or set $ENVSTOW_IDENTITY",
                 p.display()
             ),
             LayoutError::Empty(what) => write!(f, "{what} is empty"),
@@ -87,9 +87,9 @@ pub fn locate() -> Result<Paths, LayoutError> {
     }
 }
 
-/// Path to the identity (private key) file: `$ENVSEAL_IDENTITY` or the per-user config path.
+/// Path to the identity (private key) file: `$ENVSTOW_IDENTITY` or the per-user config path.
 pub fn identity_path() -> PathBuf {
-    if let Some(p) = env::var_os("ENVSEAL_IDENTITY") {
+    if let Some(p) = env::var_os("ENVSTOW_IDENTITY") {
         return PathBuf::from(p);
     }
     let base = if cfg!(windows) {
@@ -100,7 +100,7 @@ pub fn identity_path() -> PathBuf {
             .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
     };
     base.unwrap_or_else(|| PathBuf::from("."))
-        .join("envseal")
+        .join("envstow")
         .join("identity.txt")
 }
 
@@ -138,7 +138,7 @@ pub fn write_new_identity(secret: &str) -> Result<PathBuf, LayoutError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| LayoutError::Io(e.to_string()))?;
     }
-    let contents = format!("# envseal age identity — PRIVATE. Never commit or share.\n{secret}\n");
+    let contents = format!("# envstow age identity — PRIVATE. Never commit or share.\n{secret}\n");
     fs::write(&path, contents).map_err(|e| LayoutError::Io(e.to_string()))?;
     set_owner_only(&path)?;
     Ok(path)
@@ -189,9 +189,9 @@ pub fn parse_recipients(text: &str) -> Vec<Recipient> {
 /// Render recipients back to file text, preserving labels as trailing `# Label` comments.
 pub fn render_recipients(recipients: &[Recipient]) -> String {
     let mut s = String::from(
-        "# envseal recipients — age PUBLIC keys that can decrypt the store.\n\
+        "# envstow recipients — age PUBLIC keys that can decrypt the store.\n\
          # One `age1...` per line; add a `# Name` label if you like.\n\
-         # After editing, run `envseal reencrypt` (or add/remove-recipient) to re-key the store.\n",
+         # After editing, run `envstow reencrypt` (or add/remove-recipient) to re-key the store.\n",
     );
     for r in recipients {
         match &r.label {
@@ -275,12 +275,12 @@ mod tests {
     #[test]
     fn identity_path_respects_env_override() {
         // Save/restore so we don't disturb other tests' environment assumptions.
-        let prev = env::var_os("ENVSEAL_IDENTITY");
-        env::set_var("ENVSEAL_IDENTITY", "/tmp/custom-identity.txt");
+        let prev = env::var_os("ENVSTOW_IDENTITY");
+        env::set_var("ENVSTOW_IDENTITY", "/tmp/custom-identity.txt");
         assert_eq!(identity_path(), PathBuf::from("/tmp/custom-identity.txt"));
         match prev {
-            Some(v) => env::set_var("ENVSEAL_IDENTITY", v),
-            None => env::remove_var("ENVSEAL_IDENTITY"),
+            Some(v) => env::set_var("ENVSTOW_IDENTITY", v),
+            None => env::remove_var("ENVSTOW_IDENTITY"),
         }
     }
 

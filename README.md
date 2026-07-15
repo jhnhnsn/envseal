@@ -1,4 +1,4 @@
-# envseal
+# envstow
 
 An **age-encrypted key-value store committed to your repo**, decrypted with each collaborator's
 **own age key** and surfaced **by name** — so neither a human nor an AI coding agent (Claude
@@ -19,8 +19,8 @@ Code, Cursor, …) has to paste a secret's plaintext onto a command line.
 ```
 recipients                        # age PUBLIC keys, committed. Who can decrypt.
 secrets/secrets.enc               # age-encrypted KEY=value store, committed.
-~/.config/envseal/identity.txt    # YOUR age private key. Never committed. (0600)
-                                  #   Windows: %APPDATA%\envseal\identity.txt
+~/.config/envstow/identity.txt    # YOUR age private key. Never committed. (0600)
+                                  #   Windows: %APPDATA%\envstow\identity.txt
 ```
 
 To *use* a secret you unlock it into a **child process**. The child gets the value in its
@@ -33,21 +33,21 @@ call, or its transcript. You only ever type the variable **name**.
 
 ```bash
 # macOS / Linux — prebuilt binary, no toolchain needed:
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.sh | sh
 ```
 ```powershell
 # Windows (PowerShell):
-powershell -c "irm https://github.com/jhnhnsn/envseal/releases/latest/download/envseal-installer.ps1 | iex"
+powershell -c "irm https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.ps1 | iex"
 ```
 
 Installs to `~/.local/bin` — **open a new terminal** (or `source ~/.local/bin/env`) before
-running `envseal`, then `envseal --version` to confirm. The installer verifies the binary's
+running `envstow`, then `envstow --version` to confirm. The installer verifies the binary's
 SHA-256 and enforces TLS. To inspect the script first, or verify checksums by hand, see the
-install options in [ONBOARDING.md](./ONBOARDING.md#1-install-envseal-once-per-machine). Or build
+install options in [ONBOARDING.md](./ONBOARDING.md#1-install-envstow-once-per-machine). Or build
 from source (needs [Rust](https://rustup.rs)): `cargo install --path bin`.
 
-**Joining a team that already uses envseal?** See **[ONBOARDING.md](./ONBOARDING.md)** — install,
-share your key, get added. A ready-made **AI-agent skill** ([`agent/envseal-skill.md`](./agent/envseal-skill.md))
+**Joining a team that already uses envstow?** See **[ONBOARDING.md](./ONBOARDING.md)** — install,
+share your key, get added. A ready-made **AI-agent skill** ([`agent/envstow-skill.md`](./agent/envstow-skill.md))
 teaches Claude Code to use secrets by name — install it globally or per-repo (see
 [GUARDRAILS.md](./GUARDRAILS.md)).
 
@@ -56,16 +56,16 @@ teaches Claude Code to use secrets by name — install it globally or per-repo (
 ## Usage scenarios
 
 Secrets are always referenced by **name**; the plaintext only ever lives inside the child
-process envseal spawns.
+process envstow spawns.
 
 ### 1. First-time setup
 
 ```bash
-envseal init
-git add recipients secrets/secrets.enc && git commit -m "Add envseal store"
+envstow init
+git add recipients secrets/secrets.enc && git commit -m "Add envstow store"
 ```
 
-`init` creates your private key (in `~/.config/envseal/`, never committed), the `recipients`
+`init` creates your private key (in `~/.config/envstow/`, never committed), the `recipients`
 list, and an empty store. Idempotent.
 
 ### 2. Add and list secrets
@@ -74,15 +74,15 @@ Copy a secret from your password manager, then paste it into `set` — the value
 **stdin**, so it never lands on the command line or in your shell history:
 
 ```bash
-pbpaste | envseal set MY_SUPER_SECRET_KEY                   # macOS: paste from clipboard
-# Linux (wayland): wl-paste | envseal set MY_SUPER_SECRET_KEY
-# Linux (X11):     xclip -o  | envseal set MY_SUPER_SECRET_KEY
+pbpaste | envstow set MY_SUPER_SECRET_KEY                   # macOS: paste from clipboard
+# Linux (wayland): wl-paste | envstow set MY_SUPER_SECRET_KEY
+# Linux (X11):     xclip -o  | envstow set MY_SUPER_SECRET_KEY
 #   → ✔  set MY_SUPER_SECRET_KEY (sk-pr••••••••)   ← masked confirmation of what you stored
 
-envseal set MY_SUPER_SECRET_KEY                             # …or run bare, then paste + Enter
-printf 'sk-proj-abc123' | envseal set MY_SUPER_SECRET_KEY   # …or pipe a literal
-envseal edit                                           # …or edit them all in $EDITOR
-envseal list                                           # names only, never values
+envstow set MY_SUPER_SECRET_KEY                             # …or run bare, then paste + Enter
+printf 'sk-proj-abc123' | envstow set MY_SUPER_SECRET_KEY   # …or pipe a literal
+envstow edit                                           # …or edit them all in $EDITOR
+envstow list                                           # names only, never values
 ```
 
 `set` confirms with a **masked preview** — the first 5 characters then dots (or all dots for
@@ -95,12 +95,12 @@ see [Multi-line secrets](#multi-line-secrets) below.
 
 ### 3. Run something that needs secrets
 
-`envseal unlock -- <cmd>` runs one command with every secret set as an env var:
+`envstow unlock -- <cmd>` runs one command with every secret set as an env var:
 
 ```bash
-envseal unlock -- npm run build
-envseal unlock -- flyctl deploy
-envseal unlock -- sh -c 'psql "$DATABASE_URL" -f migrate.sql'
+envstow unlock -- npm run build
+envstow unlock -- flyctl deploy
+envstow unlock -- sh -c 'psql "$DATABASE_URL" -f migrate.sql'
 ```
 
 You typed `$DATABASE_URL` — the shell expands it *inside the child*, so the value reaches `psql`
@@ -111,73 +111,73 @@ but never your history or a log.
 Start the agent from an unlocked subshell; every command it runs inherits the secrets:
 
 ```bash
-envseal unlock     # subshell with all secrets set; `exit` locks
+envstow unlock     # subshell with all secrets set; `exit` locks
 claude             # launched inside it — references $MY_SUPER_SECRET_KEY by name
 ```
 
-If the agent tries to read a value directly, it can't — `envseal get` masks under an agent:
+If the agent tries to read a value directly, it can't — `envstow get` masks under an agent:
 
 ```bash
-envseal get FLY_API_TOKEN    # → ••••••••  (see "Why this is AI-safe")
+envstow get FLY_API_TOKEN    # → ••••••••  (see "Why this is AI-safe")
 ```
 
 ### 5. Read a value yourself
 
-Outside an agent, `envseal get` prints the value when its output is captured; `--show` forces it:
+Outside an agent, `envstow get` prints the value when its output is captured; `--show` forces it:
 
 ```bash
-export GITHUB_TOKEN="$(envseal get GITHUB_TOKEN)"
-envseal get DATABASE_URL --show
+export GITHUB_TOKEN="$(envstow get GITHUB_TOKEN)"
+envstow get DATABASE_URL --show
 ```
 
 ### 6. Onboard a teammate
 
 ```bash
 # Alice: generate her key and share the public half (safe to paste anywhere).
-envseal init && envseal pubkey        # → age1abc…
+envstow init && envstow pubkey        # → age1abc…
 
 # You: add her, re-encrypt, commit.
-envseal add-recipient age1abc… alice
+envstow add-recipient age1abc… alice
 git add recipients secrets/secrets.enc && git commit -m "Add Alice"
 ```
 
 Only the **public** key (`age1…`) is shared — it lets you encrypt *to* someone, never decrypt.
-The private key (`~/.config/envseal/identity.txt`) is never shared or committed.
+The private key (`~/.config/envstow/identity.txt`) is never shared or committed.
 
 ### 7. Offboard a teammate
 
 ```bash
-envseal remove-recipient alice
+envstow remove-recipient alice
 ```
 
 This re-encrypts without Alice, but her key still decrypts old commits. **Rotation is the real
-revocation:** regenerate each secret she saw and `envseal set` the new value.
+revocation:** regenerate each secret she saw and `envstow set` the new value.
 
 ### 8. CI / automation
 
-Point `$ENVSEAL_IDENTITY` at a dedicated CI key (added as a recipient, stored as a CI secret):
+Point `$ENVSTOW_IDENTITY` at a dedicated CI key (added as a recipient, stored as a CI secret):
 
 ```bash
-ENVSEAL_IDENTITY=/path/to/ci-key envseal unlock -- npm run deploy
+ENVSTOW_IDENTITY=/path/to/ci-key envstow unlock -- npm run deploy
 ```
 
 ### On Windows
 
-Most commands are identical — `envseal init`, `list`, `pubkey`, `add-recipient`, and
-`envseal unlock -- <program>` all work as-is. Only a few things differ:
+Most commands are identical — `envstow init`, `list`, `pubkey`, `add-recipient`, and
+`envstow unlock -- <program>` all work as-is. Only a few things differ:
 
 ```powershell
-# Your identity lives at %APPDATA%\envseal\identity.txt; `edit` opens Notepad.
-'sk-proj-abc123' | envseal set MY_SUPER_SECRET_KEY     # PowerShell pipes a value to stdin
-envseal unlock -- npm run build                   # runs the program directly — same as POSIX
+# Your identity lives at %APPDATA%\envstow\identity.txt; `edit` opens Notepad.
+'sk-proj-abc123' | envstow set MY_SUPER_SECRET_KEY     # PowerShell pipes a value to stdin
+envstow unlock -- npm run build                   # runs the program directly — same as POSIX
 
 # The only real difference: no `sh -c`. To reference a value by name in a shell,
 # use PowerShell (%VAR% for cmd.exe):
-envseal unlock -- powershell -c 'psql $env:DATABASE_URL -f migrate.sql'
-envseal unlock -- cmd /c "psql %DATABASE_URL% -f migrate.sql"
+envstow unlock -- powershell -c 'psql $env:DATABASE_URL -f migrate.sql'
+envstow unlock -- cmd /c "psql %DATABASE_URL% -f migrate.sql"
 
 # Start an unlocked subshell (cmd.exe by default via %COMSPEC%):
-envseal unlock
+envstow unlock
 ```
 
 ### Multi-line secrets
@@ -186,14 +186,14 @@ envseal unlock
 since a multi-line value can't be typed at the single-line interactive prompt:
 
 ```bash
-envseal set TLS_KEY   < privkey.pem
-envseal set GCP_CREDS < service-account.json
+envstow set TLS_KEY   < privkey.pem
+envstow set GCP_CREDS < service-account.json
 ```
 
 Under the hood, multi-line values are base64-encoded inside the store (so the on-disk dotenv
 stays one line per key); `unlock`/`get` decode them transparently, so the env var your program
 sees is the exact original. Single-line secrets are stored as-is. Pasting a multi-line value
-into the interactive prompt won't work — pipe it or use `envseal edit`.
+into the interactive prompt won't work — pipe it or use `envstow edit`.
 
 ---
 
@@ -201,43 +201,43 @@ into the interactive prompt won't work — pipe it or use `envseal edit`.
 
 | Command | Purpose |
 |---|---|
-| `envseal init` | Generate identity, create `recipients` + empty store. Idempotent. |
-| `envseal set <NAME>` | Store a value read from **stdin** (keeps it off the command line). |
-| `envseal edit` | Decrypt all secrets into `$EDITOR`, re-encrypt on save (temp file shredded). |
-| `envseal get <NAME> [--show]` | Resolve one secret by name. **Masked under an agent** unless `--show`. |
-| `envseal list` | List secret **names** (never values). |
-| `envseal pubkey` | Print your age **public** key, to share so a member can add you. |
-| `envseal unlock [-- <cmd>]` | Run a command (or subshell) with every secret set as an env var. |
-| `envseal add-recipient <age1…> [label]` | Add a collaborator; re-encrypt. |
-| `envseal remove-recipient <key\|label>` | Remove a collaborator; re-encrypt (then **rotate**). |
-| `envseal reencrypt` | Re-encrypt the store to the current `recipients` (after hand-editing it). |
+| `envstow init` | Generate identity, create `recipients` + empty store. Idempotent. |
+| `envstow set <NAME>` | Store a value read from **stdin** (keeps it off the command line). |
+| `envstow edit` | Decrypt all secrets into `$EDITOR`, re-encrypt on save (temp file shredded). |
+| `envstow get <NAME> [--show]` | Resolve one secret by name. **Masked under an agent** unless `--show`. |
+| `envstow list` | List secret **names** (never values). |
+| `envstow pubkey` | Print your age **public** key, to share so a member can add you. |
+| `envstow unlock [-- <cmd>]` | Run a command (or subshell) with every secret set as an env var. |
+| `envstow add-recipient <age1…> [label]` | Add a collaborator; re-encrypt. |
+| `envstow remove-recipient <key\|label>` | Remove a collaborator; re-encrypt (then **rotate**). |
+| `envstow reencrypt` | Re-encrypt the store to the current `recipients` (after hand-editing it). |
 
-**Environment:** `ENVSEAL_IDENTITY` overrides the identity path (default
-`~/.config/envseal/identity.txt`). `ENVSEAL_AGENT=1` forces agent-masking for `get` in tools
-that aren't auto-detected. Inside an `envseal unlock` subshell, `ENVSEAL_UNLOCKED=1` is set —
+**Environment:** `ENVSTOW_IDENTITY` overrides the identity path (default
+`~/.config/envstow/identity.txt`). `ENVSTOW_AGENT=1` forces agent-masking for `get` in tools
+that aren't auto-detected. Inside an `envstow unlock` subshell, `ENVSTOW_UNLOCKED=1` is set —
 use it to show an "unlocked" indicator in your prompt (below).
 
 ### Show unlock state in your prompt
 
-`envseal unlock` sets `ENVSEAL_UNLOCKED=1` in the subshell it spawns, so you can tell at a glance
+`envstow unlock` sets `ENVSTOW_UNLOCKED=1` in the subshell it spawns, so you can tell at a glance
 when secrets are live in your shell (and it disappears when you `exit`).
 
 **Starship** (`~/.config/starship.toml`) — add the module to your `format` and define it:
 
 ```toml
-format = "${env_var.ENVSEAL_UNLOCKED}$directory$character"   # …plus your other modules
+format = "${env_var.ENVSTOW_UNLOCKED}$directory$character"   # …plus your other modules
 
-[env_var.ENVSEAL_UNLOCKED]
-variable = "ENVSEAL_UNLOCKED"
-format = "[🔓 envseal]($style) "
+[env_var.ENVSTOW_UNLOCKED]
+variable = "ENVSTOW_UNLOCKED"
+format = "[🔓 envstow]($style) "
 style = "bold yellow"
 ```
 
 **Plain bash/zsh** (`~/.bashrc` / `~/.zshrc`):
 
 ```bash
-[[ -n "$ENVSEAL_UNLOCKED" ]] && PS1="🔓 $PS1"     # bash
-[[ -n "$ENVSEAL_UNLOCKED" ]] && PROMPT="🔓 $PROMPT" # zsh
+[[ -n "$ENVSTOW_UNLOCKED" ]] && PS1="🔓 $PS1"     # bash
+[[ -n "$ENVSTOW_UNLOCKED" ]] && PROMPT="🔓 $PROMPT" # zsh
 ```
 
 ---
@@ -245,13 +245,13 @@ style = "bold yellow"
 ## Why this is AI-safe
 
 The environment-variable channel and the AI's context channel are **separate**. You tell the
-agent "the token is in `$FLY_API_TOKEN`", and it runs `envseal unlock -- sh -c 'deploy --token
-"$FLY_API_TOKEN"'`. The shell expands `$FLY_API_TOKEN` *inside the child envseal spawns* — the
+agent "the token is in `$FLY_API_TOKEN`", and it runs `envstow unlock -- sh -c 'deploy --token
+"$FLY_API_TOKEN"'`. The shell expands `$FLY_API_TOKEN` *inside the child envstow spawns* — the
 value never appears in the agent's tool call or its output.
 
-`envseal get` reinforces this: **under an agent it masks its output by default** (prints
+`envstow get` reinforces this: **under an agent it masks its output by default** (prints
 `••••••••`), because an agent captures stdout and we can't distinguish "used inside `$(…)`"
-from "run bare into the transcript". A human who needs the value runs `envseal get NAME --show`.
+from "run bare into the transcript". A human who needs the value runs `envstow get NAME --show`.
 
 Three optional defense layers back this up — set them up in **your** repo by following
 **[GUARDRAILS.md](./GUARDRAILS.md)** (Claude Code, Cursor, and other agents covered):
@@ -266,7 +266,7 @@ Three optional defense layers back this up — set them up in **your** repo by f
 > agent who deliberately runs `--show` will see the value — that's by design (you own the
 > secret). What it prevents is *pasting* and *accidental* leakage.
 >
-> **Setting up a repo that USES envseal?** The guardrails don't install themselves — follow
+> **Setting up a repo that USES envstow?** The guardrails don't install themselves — follow
 > **[GUARDRAILS.md](./GUARDRAILS.md)**, or point your agent at its URL and ask it to apply them.
 
 ---
@@ -284,7 +284,7 @@ For those: rotate, and treat this as strong hygiene, not a vault.
 
 ---
 
-## Developing on envseal
+## Developing on envstow
 
 ```bash
 cd bin && cargo test         # unit + integration: crypto round-trip, masking, full CLI lifecycle
