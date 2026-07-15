@@ -8,7 +8,7 @@
 //!   envstow delete <NAME>           Remove one secret and re-encrypt (then rotate!).
 //!   envstow unlock [-- <cmd>...]    Spawn a subshell / run a command with the whole env set.
 //!   envstow refresh                 Emit `unset` lines for secrets that left the store (eval it).
-//!   envstow update [--check|--yes]  Check for / install a newer envstow.
+//!   envstow upgrade [--check|--yes] Check for / install a newer envstow.
 //!   envstow init                    Generate an identity, add self as recipient, create store.
 //!   envstow pubkey                  Print your age public key (share it to be added).
 //!   envstow add-recipient <age1..>  Add a recipient and re-encrypt the store.
@@ -74,7 +74,12 @@ fn main() {
         Some("pubkey") => cmd_pubkey(),
         Some("unlock") => cmd_unlock(&args[1..]),
         Some("refresh") => cmd_refresh(&args[1..]),
-        Some("update") => cmd_update(&args[1..]),
+        // `upgrade` is the canonical name (deno upgrade, rustup self update): "upgrade" means
+        // the program itself, while "update" tends to mean the things a program manages (npm
+        // update, brew upgrade, rustup update). envstow manages secrets, so `update` is kept
+        // free for that sense — and accepted here as an undocumented alias for anyone who used
+        // it in 0.1.12, the one release where it was the real name.
+        Some("upgrade") | Some("update") => cmd_upgrade(&args[1..]),
         Some("init") => cmd_init(&args[1..]),
         Some("add-recipient") => cmd_add_recipient(&args[1..]),
         Some("remove-recipient") => cmd_remove_recipient(&args[1..]),
@@ -1127,14 +1132,14 @@ fn install_receipt() -> Option<String> {
     }
 }
 
-/// `envstow update [--check]` — check for a newer release, and install it by re-running the
+/// `envstow upgrade [--check]` — check for a newer release, and install it by re-running the
 /// published installer.
 ///
 /// Refuses to self-update an install we didn't perform: overwriting a Homebrew/AUR-managed binary
 /// desynchronizes it from the package manager's database (`brew doctor` complains; pacman
 /// considers it hostile), or drops a second envstow on PATH that may shadow the managed one.
 /// When there's no cargo-dist receipt, we say who should do the updating instead.
-fn cmd_update(args: &[String]) -> i32 {
+fn cmd_upgrade(args: &[String]) -> i32 {
     let mut check_only = false;
     let mut yes = false;
     for a in args {
@@ -1142,8 +1147,8 @@ fn cmd_update(args: &[String]) -> i32 {
             "--check" => check_only = true,
             "--yes" | "-y" => yes = true,
             s => {
-                eprintln!("envstow update: unknown argument '{s}'");
-                eprintln!("usage: envstow update [--check] [--yes]");
+                eprintln!("envstow upgrade: unknown argument '{s}'");
+                eprintln!("usage: envstow upgrade [--check] [--yes]");
                 return 2;
             }
         }
@@ -1198,7 +1203,7 @@ fn cmd_update(args: &[String]) -> i32 {
         if !io::stdin().is_terminal() {
             eprintln!(
                 "\nenvstow: refusing to update non-interactively — pass `--yes` to confirm:\n\
-                 \x20  envstow update --yes"
+                 \x20  envstow upgrade --yes"
             );
             return 1;
         }
@@ -1871,7 +1876,7 @@ fn print_help() {
          \x20 envstow reencrypt                Re-encrypt the store to the current recipients.\n\
          \x20 envstow profile [create <name>]  Show the current profile, or create a new one.\n\
          \x20 envstow profiles                 List available profiles.\n\
-         \x20 envstow update [--check|--yes]   Update envstow to the latest release.\n\
+         \x20 envstow upgrade [--check|--yes]  Upgrade envstow to the latest release.\n\
          \n\
          Profiles: add `--profile <name>` to any command to use a separate secret set\n\
          (e.g. dev/staging/prod), or set $ENVSTOW_PROFILE. Default is `default`.\n\

@@ -546,7 +546,7 @@ fn write_fake_curl(dir: &Path, tag_url: &str) -> PathBuf {
 
 #[cfg(unix)]
 #[test]
-fn update_check_reports_a_newer_version_without_installing() {
+fn upgrade_check_reports_a_newer_version_without_installing() {
     let repo = Repo::new("updchk");
     // Pretend GitHub's latest is an absurdly high version so this test survives real releases.
     let bin_dir = write_fake_curl(
@@ -559,7 +559,7 @@ fn update_check_reports_a_newer_version_without_installing() {
         std::env::var("PATH").unwrap_or_default()
     );
 
-    let out = repo.run_env(&["update", "--check"], "", "PATH", &path);
+    let out = repo.run_env(&["upgrade", "--check"], "", "PATH", &path);
     assert_eq!(out.code, 0, "--check should succeed: {}", out.stderr);
     assert!(
         out.stderr.contains("99.0.0") && out.stderr.contains("is available"),
@@ -576,7 +576,7 @@ fn update_check_reports_a_newer_version_without_installing() {
 
 #[cfg(unix)]
 #[test]
-fn update_says_nothing_to_do_when_current() {
+fn upgrade_says_nothing_to_do_when_current() {
     let repo = Repo::new("updcur");
     // Report our own version as latest.
     let tag = format!(
@@ -590,7 +590,7 @@ fn update_says_nothing_to_do_when_current() {
         std::env::var("PATH").unwrap_or_default()
     );
 
-    let out = repo.run_env(&["update"], "", "PATH", &path);
+    let out = repo.run_env(&["upgrade"], "", "PATH", &path);
     assert_eq!(out.code, 0);
     assert!(
         out.stderr.contains("up to date"),
@@ -606,7 +606,7 @@ fn update_says_nothing_to_do_when_current() {
 
 #[cfg(unix)]
 #[test]
-fn update_refuses_when_not_installed_by_our_installer() {
+fn upgrade_refuses_when_not_installed_by_our_installer() {
     // No cargo-dist receipt (ENVSTOW_IDENTITY points into a temp dir with no receipt beside it),
     // so this stands in for a Homebrew/AUR/cargo-install copy: envstow must NOT overwrite it.
     let repo = Repo::new("updpkg");
@@ -620,7 +620,7 @@ fn update_refuses_when_not_installed_by_our_installer() {
         std::env::var("PATH").unwrap_or_default()
     );
 
-    let out = repo.run_env(&["update"], "", "PATH", &path);
+    let out = repo.run_env(&["upgrade"], "", "PATH", &path);
     assert_ne!(out.code, 0, "should refuse without a receipt");
     assert!(
         out.stderr
@@ -642,7 +642,7 @@ fn update_refuses_when_not_installed_by_our_installer() {
 
 #[cfg(unix)]
 #[test]
-fn update_refuses_to_run_non_interactively_without_yes() {
+fn upgrade_refuses_to_run_non_interactively_without_yes() {
     // Replacing the running binary by piping a remote script to sh is not something to do by
     // default in CI. A non-TTY caller must opt in explicitly.
     let repo = Repo::new("updci");
@@ -664,7 +664,7 @@ fn update_refuses_to_run_non_interactively_without_yes() {
     );
 
     // Repo::run pipes stdin, so this is the non-TTY case.
-    let out = repo.run_env(&["update"], "", "PATH", &path);
+    let out = repo.run_env(&["upgrade"], "", "PATH", &path);
     assert_ne!(out.code, 0, "should refuse without --yes");
     assert!(
         out.stderr.contains("--yes"),
@@ -678,10 +678,36 @@ fn update_refuses_to_run_non_interactively_without_yes() {
     );
 }
 
+#[cfg(unix)]
 #[test]
-fn update_rejects_unknown_flags() {
+fn update_still_works_as_an_alias_for_upgrade() {
+    // `update` was the real name in 0.1.12 only. It stays as an undocumented alias so anyone who
+    // read that changelog isn't broken by the rename.
+    let repo = Repo::new("updalias");
+    let tag = format!(
+        "https://github.com/jhnhnsn/envstow/releases/tag/v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    let bin_dir = write_fake_curl(&repo.dir, &tag);
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let aliased = repo.run_env(&["update", "--check"], "", "PATH", &path);
+    let canonical = repo.run_env(&["upgrade", "--check"], "", "PATH", &path);
+    assert_eq!(aliased.code, 0, "alias should work: {}", aliased.stderr);
+    assert_eq!(
+        aliased.stderr, canonical.stderr,
+        "`update` must behave identically to `upgrade`"
+    );
+}
+
+#[test]
+fn upgrade_rejects_unknown_flags() {
     let repo = Repo::new("updflag");
-    let out = repo.run(&["update", "--yolo"], "");
+    let out = repo.run(&["upgrade", "--yolo"], "");
     assert_eq!(out.code, 2, "unknown flag should be a usage error");
     assert!(
         out.stderr.contains("usage"),

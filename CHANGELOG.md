@@ -2,27 +2,37 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.13
+
+### Changed
+- **`envstow update` is now `envstow upgrade`.** `update` still works as an undocumented alias, so
+  nothing breaks. The rename follows the convention the comparable tools settled on: **`upgrade`
+  means the program itself** (`deno upgrade`, `rustup self update`), while **`update` means the
+  things a program manages** (`npm update`, `brew upgrade`, `rustup update` → toolchains). envstow
+  manages secrets, so `update` is better left free for that sense.
+
 ## 0.1.12
 
 ### Added
-- **`envstow update`** and **`envstow update --check`.** Update envstow without remembering the
+- **`envstow upgrade`** and **`envstow upgrade --check`** (shipped in 0.1.12 as `envstow update`;
+  renamed in 0.1.13, with `update` kept as an alias). Upgrade envstow without remembering the
   installer URL — which was the only real reason to remember it.
   ```
-  $ envstow update --check
-  ⬆️  envstow 0.1.12 is available (you have 0.1.11).
-     https://github.com/jhnhnsn/envstow/releases/tag/v0.1.12
+  $ envstow upgrade --check
+  ⬆️  envstow 0.1.13 is available (you have 0.1.12).
+     https://github.com/jhnhnsn/envstow/releases/tag/v0.1.13
   ```
-  `update` re-runs the published installer (same URL, same TLS pinning the README documents);
+  It re-runs the published installer (same URL, same TLS pinning the README documents);
   `--check` only reports. **Zero new dependencies** — the version check follows the
   `/releases/latest` redirect with `curl` and reads the tag off the final URL (no JSON to parse,
   no API token, no rate limit), and the install shells out to the same `curl … | sh` you'd type.
   Linking a self-updater crate would have pulled ~60 more crates including a full async runtime
   into a secrets tool that deliberately has three dependencies.
 
-  **It refuses to update an install it doesn't own.** If there's no cargo-dist receipt — a
+  **It refuses to upgrade an install it doesn't own.** If there's no cargo-dist receipt — a
   Homebrew/AUR/`cargo install` copy — overwriting the binary would desync it from the package
   manager or leave two envstows on PATH, so it names the right updater instead. And it won't
-  replace the binary non-interactively without `--yes`: `update` downloads and executes a remote
+  replace the binary non-interactively without `--yes`: it downloads and executes a remote
   script over the running executable, which no CI job should do by accident.
 
 ## 0.1.11

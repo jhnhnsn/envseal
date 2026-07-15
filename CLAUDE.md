@@ -37,8 +37,8 @@ install or invoke.
 - `eval "$(envstow refresh)"` — inside an unlocked shell, unset secrets that have since left the
   store. Only ever emits `unset` lines, never values, so it's safe to run under an agent.
 - `envstow add-recipient <age1...>` / `remove-recipient <key|label>` — manage collaborators.
-- `envstow update [--check]` — update envstow itself. Safe to run `--check`; the human should run
-  the actual update (it needs `--yes` non-interactively and replaces the binary).
+- `envstow upgrade [--check]` — upgrade envstow itself. Safe to run `--check`; the human should run
+  the actual upgrade (it needs `--yes` non-interactively and replaces the binary).
 
 The human generates their key and creates the store with `envstow init`. You do not need to
 run `init`. Just use secrets by name via `unlock`/`get` as above.
