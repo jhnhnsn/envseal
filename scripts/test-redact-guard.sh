@@ -66,4 +66,28 @@ run_case "blocks the middle line of a multi-line secret" 2 \
   '{"tool_response":{"stdout":"exfiltrated: MIISECRETMIDDLELINExyz0000"}}'
 unset ENVSTOW_LOADED TLS_KEY DATABASE_URL
 
+# 7. A SHORT but distinctive token (7 chars, mixes letters+digit+symbol) must be
+#    blocked — the old fixed 8-char floor missed these.
+export SHORT_KEY="sk-9x2"
+export ENVSTOW_LOADED="SHORT_KEY"
+run_case "blocks a short but high-entropy token" 2 \
+  '{"tool_response":{"stdout":"leaked token: sk-9x2 oops"}}'
+unset ENVSTOW_LOADED SHORT_KEY
+
+# 8. A low-entropy value must NOT over-block, even at 8+ chars: a run of digits
+#    appears in innocent output all the time. (Old floor blocked this.)
+export PIN_TOKEN="12345678"
+export ENVSTOW_LOADED="PIN_TOKEN"
+run_case "does not over-block a low-entropy digit run" 0 \
+  '{"tool_response":{"stdout":"build finished, exit 12345678 lines processed"}}'
+unset ENVSTOW_LOADED PIN_TOKEN
+
+# 9. A dictionary-word value must NOT over-block: blocking every mention of a
+#    common word would be worse than the rare short-secret miss.
+export WORD_SECRET="password"
+export ENVSTOW_LOADED="WORD_SECRET"
+run_case "does not over-block a common dictionary word" 0 \
+  '{"tool_response":{"stdout":"enter your password to continue"}}'
+unset ENVSTOW_LOADED WORD_SECRET
+
 exit "$fail"

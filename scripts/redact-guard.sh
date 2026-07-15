@@ -55,23 +55,54 @@ names.update(n for n in loaded.split(",") if n)
 conv = re.compile(r"(_KEY|_TOKEN|_SECRET|_PASSWORD|_PASSWD)$|^API_")
 names.update(n for n in os.environ if conv.search(n))
 
-MIN = 8  # skip trivially short values -> avoids false positives on noise
+def distinctive(s):
+    """Is `s` distinctive enough that finding it in tool output means a real
+    leak, not a chance collision with ordinary text?
+
+    Length alone is a poor gate: `12345678` and `password` are 8+ chars yet
+    appear in innocent output constantly (false positives), while a 6-char
+    random token like `x9K2mQ` almost never does. So we gate on both length and
+    character-class diversity — a proxy for entropy:
+
+      * < 5 chars           -> never (too short to match safely, e.g. a PIN)
+      * >= 12 chars         -> yes (accidental collision is negligible)
+      * 5..11 chars         -> only if it mixes >=2 classes
+                               (lower/upper/digit/symbol) — i.e. looks random,
+                               not like a dictionary word or a run of digits
+
+    This catches short-but-random secrets the old fixed floor of 8 missed, AND
+    stops the old floor from blocking on common 8+ char strings.
+    """
+    n = len(s)
+    if n < 5:
+        return False
+    if n >= 12:
+        return True
+    classes = (
+        any(c.islower() for c in s)
+        + any(c.isupper() for c in s)
+        + any(c.isdigit() for c in s)
+        + any(not c.isalnum() for c in s)
+    )
+    return classes >= 2
 
 def leak(name):
     value = os.environ.get(name, "")
-    if len(value) < MIN:
+    if not distinctive(value):
         return None
     # Needles: the whole value, PLUS each individual line of a multi-line value
     # (a PEM/JSON secret can leak one sensitive line at a time, which is not a
     # substring of the whole). Over-blocking on a boilerplate line is the
     # fail-safe direction — key material in tool output is suspicious regardless.
     needles = {value}
-    needles.update(ln for ln in value.splitlines() if len(ln) >= MIN)
+    needles.update(value.splitlines())
     for n in needles:
-        if len(n) >= MIN and n in output:
+        if distinctive(n) and n in output:
             return "the live value of"
+    # base64 output is always high-entropy; a length gate is enough to avoid
+    # matching a stray short blob.
     b64 = base64.b64encode(value.encode()).decode()
-    if len(b64) >= MIN and b64 in output:
+    if len(b64) >= 12 and b64 in output:
         return "a base64-encoded copy of"
     return None
 
