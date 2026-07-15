@@ -20,9 +20,10 @@ install or invoke.
     the value, they run `envstow get NAME --show` themselves.
 - **Never run:** `env`, `printenv`, `echo $SOME_SECRET`, `set`, `export -p`, or any command
   whose purpose is to reveal a secret value. These are denied in `.claude/settings.json`.
-- A `PostToolUse` hook (`scripts/redact-guard.sh`) blocks any command output that contains a
-  live secret value, as accident insurance. A "BLOCKED by envstow" message is working as
-  intended — do not retry in a way that surfaces the value.
+- A `PostToolUse` hook blocks any command output that contains a live secret value, as accident
+  insurance (this repo currently wires the legacy `scripts/redact-guard.sh`; the built-in
+  `envstow scan-leak` is the equivalent going forward). A "BLOCKED by envstow" message is working
+  as intended — do not retry in a way that surfaces the value.
 - If you believe you genuinely need a secret's plaintext, **STOP and ask the human.**
 
 ## Using envstow

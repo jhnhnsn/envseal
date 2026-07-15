@@ -68,8 +68,9 @@ unlocked session. Prints **names only**. Exit = lock.
 ## Guardrails (secondary, accident-only)
 
 - `CLAUDE.md` — reference by name; use `envstow get` rather than pasting.
-- redact-guard `PostToolUse` hook — still catches **accidental** dumps (a stray `env`, a
-  tool echoing its config). It exempts the sanctioned `envstow get` path. Kept as accident
+- `envstow scan-leak` `PostToolUse` hook (built into the binary; the old `redact-guard.sh`
+  is a deprecated equivalent) — still catches **accidental** dumps (a stray `env`, a tool
+  echoing its config). It exempts the sanctioned `envstow get` path. Kept as accident
   insurance, not as a hard secrecy boundary (see threat model).
 
 ## Explicitly dropped / deferred

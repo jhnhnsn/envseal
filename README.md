@@ -487,7 +487,7 @@ casual/accidental AI exposure of values.
 **Does NOT protect:** a compromised dependency reading `process.env` at runtime; a determined
 process exfiltrating a live var; plaintext already in git history; retroactive access removal;
 a value someone deliberately reveals with `--show`, or re-encodes (hex, gzip, url) to evade the
-redact-guard. The guard also can't safely match a **short, low-entropy** value (a 4-digit PIN, a
+output guard (`scan-leak`). The guard also can't safely match a **short, low-entropy** value (a 4-digit PIN, a
 dictionary word) — matching those would block innocent output — so it skips them; short but
 *random* tokens (5+ chars, mixed character classes) are still caught.
 For those gaps: rotate, and treat this as strong hygiene, not a vault.
