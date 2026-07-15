@@ -1,14 +1,15 @@
 # envstow
 
-An **age-encrypted key-value store committed to your repo**, decrypted with each collaborator's
-**own age key** and surfaced **by name** — so neither a human nor an AI coding agent (Claude
-Code, Cursor, …) has to paste a secret's plaintext onto a command line.
+An **age-encrypted key-value store that lives in a folder**, surfaced **by name** — so neither a
+human nor an AI coding agent (Claude Code, Cursor, …) has to paste a secret's plaintext onto a
+command line.
 
+- **Works solo, offline, no git.** A folder with `.envstow/` in it is all you need.
+- **Share it by committing it**, if you want to. The store is encrypted to each collaborator's
+  age public key, so it's safe in a repo. Everyone decrypts with their own private key.
 - **Self-contained:** one Rust binary. All crypto is the [`age`](https://crates.io/crates/age)
   crate (X25519 + ChaCha20-Poly1305) compiled in — **no `sops`, no `age` CLI, nothing else to
   install.**
-- **Multi-user:** the store is encrypted to every collaborator's age public key. Each decrypts
-  with their own private key. Add/remove people by editing a `recipients` file.
 - **AI-safe by construction:** agents reference secrets by **name** (`$AI_API_KEY`). A value is
   never printed unless it's safe to (not captured by an agent) or a human explicitly asks.
 
@@ -16,20 +17,24 @@ Code, Cursor, …) has to paste a secret's plaintext onto a command line.
 
 ## How it works
 
+envstow's unit is a **folder**. Every command looks for `.envstow/` in the current directory and
+walks up to find it. Git is optional — it's just how the folder travels to other people.
+
 ```
-.envstow/recipients               # age PUBLIC keys, committed. Who can decrypt.
-.envstow/default.enc              # age-encrypted KEY=value store (default profile), committed.
-.envstow/<profile>.enc            # additional profiles (dev/staging/prod), committed.
-                                  #   Each store starts with an `envstow-format: N` line, so a
-                                  #   too-old envstow tells you to update instead of failing
-                                  #   with a confusing decryption error.
-~/.config/envstow/identity.txt    # YOUR age private key. Never committed. (0600)
+.envstow/recipients               # age PUBLIC keys. Who the store is encrypted TO.
+.envstow/default.enc              # age-encrypted KEY=value store (default profile).
+.envstow/<profile>.enc            # additional profiles (dev/staging/prod).
+~/.config/envstow/identity.txt    # YOUR age private key. Never shared, never committed. (0600)
                                   #   Windows: %APPDATA%\envstow\identity.txt
 ```
 
 To *use* a secret you unlock it into a **child process**. The child gets the value in its
 environment and does its job; the value never appears in your shell history, an agent's tool
 call, or its transcript. You only ever type the variable **name**.
+
+If you commit `.envstow/`, everything in it is safe to share: the store is ciphertext and
+`recipients` holds only public keys. Your private key lives outside the folder and is never
+committed.
 
 ---
 
@@ -72,12 +77,21 @@ process envstow spawns.
 ### 1. First-time setup
 
 ```bash
+cd ~/my-project        # any folder — a git repo, or not
 envstow init
-git add .envstow && git commit -m "Add envstow store"
 ```
 
-`init` creates your private key (in `~/.config/envstow/`, never committed), the `recipients`
-list, and an empty store. Idempotent.
+`init` creates your private key (in `~/.config/envstow/`, once per machine), a `recipients` list
+holding your public key, and an empty store. Idempotent.
+
+That's it if you're working **solo** — no git, no sharing, nothing else to do. The folder is the
+scope; `.envstow/` stays local until you decide otherwise.
+
+**Want teammates to have it?** Commit the folder — it's encrypted:
+
+```bash
+git add .envstow && git commit -m "Add envstow store"
+```
 
 ### 2. Add and list secrets
 
@@ -143,28 +157,47 @@ export GITHUB_TOKEN="$(envstow get GITHUB_TOKEN)"
 envstow get DATABASE_URL --show
 ```
 
-### 6. Onboard a teammate
+### 6. Add a teammate
+
+**Alice** — generate a key and send you the public half. Do this **outside the project** so she
+doesn't touch its `recipients` file:
 
 ```bash
-# Alice: generate her key and share the public half (safe to paste anywhere).
-envstow init && envstow pubkey        # → age1abc…
-
-# You: add her, re-encrypt, commit.
-envstow add-recipient age1abc… alice
-git add .envstow && git commit -m "Add Alice"
+cd ~                                  # anywhere but the project
+envstow init                          # once per machine
+envstow pubkey                        # → age1abc…  send this to you (Slack/email is fine)
 ```
 
-Only the **public** key (`age1…`) is shared — it lets you encrypt *to* someone, never decrypt.
-The private key (`~/.config/envstow/identity.txt`) is never shared or committed.
+**You** — add her and push:
 
-### 7. Offboard a teammate
+```bash
+cd ~/my-project
+envstow add-recipient age1abc… alice  # adds her key AND re-encrypts the store
+git add .envstow && git commit -m "Add Alice" && git push
+```
+
+**Alice** — `git pull`, and she's in. `envstow list` works.
+
+> **`recipients` is an input to encryption, not an access list.** Putting a key in that file
+> grants nothing on its own — the store has to be **re-encrypted** to include it. That's why
+> `add-recipient` does both in one step.
+>
+> If Alice runs `envstow init` *inside* the project, it appends her key to `recipients` but she
+> still can't decrypt. envstow tells her so, and the fix is for you to run `envstow reencrypt`
+> (not `add-recipient` — her key is already listed). Avoid the detour: have her `init` elsewhere.
+
+Only the **public** key (`age1…`) is ever shared. It lets you encrypt *to* someone, never decrypt.
+
+### 7. Remove a teammate
 
 ```bash
 envstow remove-recipient alice
+git add .envstow && git commit -m "Remove Alice" && git push
 ```
 
-This re-encrypts without Alice, but her key still decrypts old commits. **Rotation is the real
-revocation:** regenerate each secret she saw and `envstow set` the new value.
+This re-encrypts without Alice — but **her key still decrypts every older commit** in any clone
+she kept. **Rotation is the real revocation:** regenerate each secret she saw at its source and
+`envstow set` the new value.
 
 ### 8. CI / automation
 
@@ -233,7 +266,7 @@ env var > `default`. Using a profile that doesn't exist errors and tells you to
 
 | Command | Purpose |
 |---|---|
-| `envstow init` | Generate identity, create `recipients` + empty store. Idempotent. |
+| `envstow init` | Generate identity, create `recipients` + empty store in this folder. Idempotent. |
 | `envstow set <NAME> [--clipboard]` | Store a value read from **stdin**, or the OS clipboard with `--clipboard` (`-c`). Never in argv either way. |
 | `envstow delete <NAME> [--force]` | Remove one secret; re-encrypt (then **rotate**). Confirms on a TTY. |
 | `envstow edit` | Decrypt all secrets into `$EDITOR`, re-encrypt on save (temp file shredded). |
@@ -242,9 +275,9 @@ env var > `default`. Using a profile that doesn't exist errors and tells you to
 | `envstow pubkey` | Print your age **public** key, to share so a member can add you. |
 | `envstow unlock [-- <cmd>]` | Run a command (or subshell) with every secret set as an env var. |
 | `eval "$(envstow refresh)"` | Unset secrets this shell still holds that have left the store. Only emits `unset` — see [Stale secrets](#stale-secrets-in-an-unlocked-shell). |
-| `envstow add-recipient <age1…> [label]` | Add a collaborator; re-encrypt. |
+| `envstow add-recipient <age1…> [label]` | Add a collaborator **and** re-encrypt — both steps. |
 | `envstow remove-recipient <key\|label>` | Remove a collaborator; re-encrypt (then **rotate**). |
-| `envstow reencrypt` | Re-encrypt the store to the current `recipients` (after hand-editing it). |
+| `envstow reencrypt` | Re-encrypt to the current `recipients` — after someone's key was added by hand or by their `init`. |
 | `envstow profile [create <name>]` | Show the current profile, or create a new one. |
 | `envstow upgrade [--check\|--yes]` | Upgrade envstow to the latest release (`--check` just reports). |
 | `envstow profiles` | List available profiles. |
@@ -365,9 +398,9 @@ It emits POSIX `unset` syntax (bash/zsh/sh/fish), so on **PowerShell** use `exit
 
 ## Nested unlocks (a store inside a store)
 
-envstow's unit is the **folder** — `.envstow/` anchors a store, and nothing stops a subfolder from
-having its own. Unlocking one from inside another is supported and often what you want: a
-subproject gets its own vars layered on top of the shared ones above it.
+Nothing stops a subfolder from having its own `.envstow/`. Unlocking one from inside another is
+supported and often what you want: a subproject gets its own vars layered on top of the shared
+ones above it.
 
 The child sees the **union** of both. Env vars are inherited, and envstow only ever *adds*, so:
 
