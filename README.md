@@ -47,6 +47,10 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envstow/release
 powershell -c "irm https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.ps1 | iex"
 ```
 
+Already have envstow? **`envstow update`** installs the latest release (or `envstow update --check`
+to just look). It re-runs the installer above for you — and refuses if a package manager owns the
+install, telling you to use that instead.
+
 Installs to `~/.local/bin` — **open a new terminal** (or `source ~/.local/bin/env`) before
 running `envstow`, then `envstow --version` to confirm. The installer verifies the binary's
 SHA-256 and enforces TLS. To inspect the script first, or verify checksums by hand, see the
@@ -242,6 +246,7 @@ env var > `default`. Using a profile that doesn't exist errors and tells you to
 | `envstow remove-recipient <key\|label>` | Remove a collaborator; re-encrypt (then **rotate**). |
 | `envstow reencrypt` | Re-encrypt the store to the current `recipients` (after hand-editing it). |
 | `envstow profile [create <name>]` | Show the current profile, or create a new one. |
+| `envstow update [--check\|--yes]` | Update envstow to the latest release (`--check` just reports). |
 | `envstow profiles` | List available profiles. |
 | `--profile <name>` | (On any command) use a separate secret set; see [Profiles](#profiles). |
 

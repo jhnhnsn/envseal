@@ -530,6 +530,166 @@ fn set_clipboard_errors_when_no_tool_is_available() {
     );
 }
 
+/// Write a fake `curl` that reports `tag_url` as the `/releases/latest` redirect target, so update
+/// tests never touch the network. Returns the dir to prepend to PATH.
+#[cfg(unix)]
+fn write_fake_curl(dir: &Path, tag_url: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let bin_dir = dir.join("curlbin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let tool = bin_dir.join("curl");
+    // envstow calls curl with -w '%{url_effective}' and expects the resolved URL on stdout.
+    std::fs::write(&tool, format!("#!/bin/sh\nprintf '%s' '{tag_url}'\n")).unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    bin_dir
+}
+
+#[cfg(unix)]
+#[test]
+fn update_check_reports_a_newer_version_without_installing() {
+    let repo = Repo::new("updchk");
+    // Pretend GitHub's latest is an absurdly high version so this test survives real releases.
+    let bin_dir = write_fake_curl(
+        &repo.dir,
+        "https://github.com/jhnhnsn/envstow/releases/tag/v99.0.0",
+    );
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let out = repo.run_env(&["update", "--check"], "", "PATH", &path);
+    assert_eq!(out.code, 0, "--check should succeed: {}", out.stderr);
+    assert!(
+        out.stderr.contains("99.0.0") && out.stderr.contains("is available"),
+        "should report the newer version: {}",
+        out.stderr
+    );
+    // --check must never install: no installer run, no confirmation prompt.
+    assert!(
+        !out.stderr.contains("running the official installer"),
+        "--check must not install: {}",
+        out.stderr
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn update_says_nothing_to_do_when_current() {
+    let repo = Repo::new("updcur");
+    // Report our own version as latest.
+    let tag = format!(
+        "https://github.com/jhnhnsn/envstow/releases/tag/v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    let bin_dir = write_fake_curl(&repo.dir, &tag);
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let out = repo.run_env(&["update"], "", "PATH", &path);
+    assert_eq!(out.code, 0);
+    assert!(
+        out.stderr.contains("up to date"),
+        "should report up-to-date: {}",
+        out.stderr
+    );
+    assert!(
+        !out.stderr.contains("running the official installer"),
+        "must not install when already current: {}",
+        out.stderr
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn update_refuses_when_not_installed_by_our_installer() {
+    // No cargo-dist receipt (ENVSTOW_IDENTITY points into a temp dir with no receipt beside it),
+    // so this stands in for a Homebrew/AUR/cargo-install copy: envstow must NOT overwrite it.
+    let repo = Repo::new("updpkg");
+    let bin_dir = write_fake_curl(
+        &repo.dir,
+        "https://github.com/jhnhnsn/envstow/releases/tag/v99.0.0",
+    );
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let out = repo.run_env(&["update"], "", "PATH", &path);
+    assert_ne!(out.code, 0, "should refuse without a receipt");
+    assert!(
+        out.stderr
+            .contains("wasn't installed by the envstow installer"),
+        "should explain why it refused: {}",
+        out.stderr
+    );
+    assert!(
+        out.stderr.contains("brew upgrade") || out.stderr.contains("package manager"),
+        "should point at the right updater: {}",
+        out.stderr
+    );
+    assert!(
+        !out.stderr.contains("running the official installer"),
+        "must not run the installer: {}",
+        out.stderr
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn update_refuses_to_run_non_interactively_without_yes() {
+    // Replacing the running binary by piping a remote script to sh is not something to do by
+    // default in CI. A non-TTY caller must opt in explicitly.
+    let repo = Repo::new("updci");
+    let bin_dir = write_fake_curl(
+        &repo.dir,
+        "https://github.com/jhnhnsn/envstow/releases/tag/v99.0.0",
+    );
+    // A cargo-dist receipt beside the identity, so this gets PAST the receipt guard and reaches
+    // the confirmation — which is what we're actually testing.
+    std::fs::write(
+        repo.identity.parent().unwrap().join("envstow-receipt.json"),
+        r#"{"provider": {"source": "cargo-dist", "version": "0.32.0"}}"#,
+    )
+    .unwrap();
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    // Repo::run pipes stdin, so this is the non-TTY case.
+    let out = repo.run_env(&["update"], "", "PATH", &path);
+    assert_ne!(out.code, 0, "should refuse without --yes");
+    assert!(
+        out.stderr.contains("--yes"),
+        "should name the flag that unblocks it: {}",
+        out.stderr
+    );
+    assert!(
+        !out.stderr.contains("running the official installer"),
+        "must not install: {}",
+        out.stderr
+    );
+}
+
+#[test]
+fn update_rejects_unknown_flags() {
+    let repo = Repo::new("updflag");
+    let out = repo.run(&["update", "--yolo"], "");
+    assert_eq!(out.code, 2, "unknown flag should be a usage error");
+    assert!(
+        out.stderr.contains("usage"),
+        "should print usage: {}",
+        out.stderr
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn refresh_unsets_a_deleted_secret_via_eval() {
