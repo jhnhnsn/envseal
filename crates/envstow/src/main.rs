@@ -33,11 +33,16 @@ use std::process::{Command, Stdio};
 use zeroize::Zeroize;
 
 mod crypto;
+mod error;
 mod layout;
 mod secrets;
 
+use error::AppError;
 use layout::Recipient;
 use secrets::Secrets;
+
+/// A command's result: `Ok(())` on success, or an [`AppError`] carrying the message and exit code.
+type Cmd = Result<(), AppError>;
 
 fn main() {
     let mut args: Vec<String> = env::args().skip(1).collect();
@@ -55,18 +60,23 @@ fn main() {
             args.remove(0);
         }
     }
-    let code = match args.first().map(String::as_str) {
+    // Commands that print their own output and always succeed (help/version) short-circuit here;
+    // everything else returns `Cmd`, and its error is turned into a message + exit code in ONE
+    // place below rather than at every failure site.
+    let result: Cmd = match args.first().map(String::as_str) {
         Some("-h") | Some("--help") => {
             print_help();
-            0
+            Ok(())
         }
         Some("-V") | Some("--version") | Some("version") => {
             println!("envstow {}", env!("CARGO_PKG_VERSION"));
-            0
+            Ok(())
         }
         None => {
             print_help();
-            2
+            // No subcommand is a usage error (exit 2), but help was already printed, so carry an
+            // empty message that main suppresses.
+            Err(AppError::usage(""))
         }
         Some("get") => cmd_get(&args[1..]),
         Some("set") => cmd_set(&args[1..]),
@@ -91,7 +101,18 @@ fn main() {
         Some(other) => {
             eprintln!("envstow: unknown command '{other}'\n");
             print_help();
-            2
+            Err(AppError::usage(""))
+        }
+    };
+
+    let code = match result {
+        Ok(()) => 0,
+        Err(e) => {
+            // Some paths (help, unknown command) already printed and carry an empty message.
+            if !e.to_string().is_empty() {
+                eprintln!("envstow: {e}");
+            }
+            e.code()
         }
     };
     std::process::exit(code);
@@ -104,7 +125,7 @@ fn main() {
 /// Resolve which profile to use and return `(profile, remaining_args)` with any `--profile
 /// <name>` (or `--profile=<name>`) removed from the args. Precedence: `--profile` flag >
 /// `ENVSTOW_PROFILE` env var > `default`. Returns an error string on a bad/missing name.
-fn resolve_profile(args: &[String]) -> Result<(String, Vec<String>), String> {
+fn resolve_profile(args: &[String]) -> Result<(String, Vec<String>), AppError> {
     let mut profile: Option<String> = None;
     let mut rest = Vec::with_capacity(args.len());
     let mut i = 0;
@@ -112,7 +133,7 @@ fn resolve_profile(args: &[String]) -> Result<(String, Vec<String>), String> {
         let a = &args[i];
         if a == "--profile" {
             let Some(name) = args.get(i + 1) else {
-                return Err("--profile requires a name".into());
+                return Err(AppError::usage("--profile requires a name"));
             };
             profile = Some(name.clone());
             i += 2;
@@ -128,36 +149,41 @@ fn resolve_profile(args: &[String]) -> Result<(String, Vec<String>), String> {
         .or_else(|| env::var("ENVSTOW_PROFILE").ok().filter(|s| !s.is_empty()))
         .unwrap_or_else(|| layout::DEFAULT_PROFILE.to_string());
     if !layout::valid_profile_name(&profile) {
-        return Err(format!(
+        return Err(AppError::usage(format!(
             "invalid profile name '{profile}' (use letters, digits, - or _)"
-        ));
+        )));
     }
     Ok((profile, rest))
 }
 
 /// Decrypt the located store for `profile` with the user's identity into a [`Secrets`] (whose
 /// values are zeroized on drop).
-fn load_secrets(profile: &str) -> Result<Secrets, String> {
-    let paths = layout::locate(profile).map_err(|e| e.to_string())?;
-    let secret = layout::read_identity_secret().map_err(|e| e.to_string())?;
-    let identity = crypto::parse_identity(&secret).map_err(|e| e.to_string())?;
+fn load_secrets(profile: &str) -> Result<Secrets, AppError> {
+    let paths = layout::locate(profile)?;
+    let secret = layout::read_identity_secret()?;
+    let identity = crypto::parse_identity(&secret)?;
     // A missing store for a NAMED profile means the profile doesn't exist — point the user at
     // `profile create` rather than the generic "no store" error (guards against typos too).
     if !paths.store.is_file() && profile != layout::DEFAULT_PROFILE {
-        return Err(format!(
+        return Err(AppError::msg(format!(
             "no such profile '{profile}'. Create it with `envstow profile create {profile}`"
-        ));
+        )));
     }
-    let ciphertext = layout::read_store(&paths.store).map_err(|e| e.to_string())?;
+    let ciphertext = layout::read_store(&paths.store)?;
 
-    let mut text = crypto::decrypt_to_text(&ciphertext, &identity)
-        .map_err(|e| explain_decrypt_failure(e.to_string(), &secret, &paths.recipients))?;
+    let mut text = crypto::decrypt_to_text(&ciphertext, &identity).map_err(|e| {
+        AppError::msg(explain_decrypt_failure(
+            e.to_string(),
+            &secret,
+            &paths.recipients,
+        ))
+    })?;
     let parsed = crypto::parse_dotenv(&text);
     text.zeroize();
     // Decode any base64-marked (multi-line) values back to their originals.
     let mut vars = Vec::with_capacity(parsed.len());
     for (k, v) in parsed {
-        let decoded = crypto::decode_value(&v).map_err(|e| e.to_string())?;
+        let decoded = crypto::decode_value(&v)?;
         vars.push((k, decoded));
     }
     Ok(Secrets::from_pairs(vars))
@@ -272,50 +298,34 @@ fn masked_preview(value: &str) -> String {
 ///     "inside $(...)" from "ran bare into the transcript".
 ///   * stdout is a terminal (human at a shell) → mask; a bare terminal print is rarely wanted.
 ///   * stdout is a pipe / command substitution (and NOT under an agent) → print the value.
-fn cmd_get(args: &[String]) -> i32 {
-    let (profile, args) = match resolve_profile(args) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow get: {e}");
-            return 2;
-        }
-    };
+fn cmd_get(args: &[String]) -> Cmd {
+    let (profile, args) = resolve_profile(args)?;
     let mut show = false;
     let mut name: Option<&str> = None;
     for a in &args {
         match a.as_str() {
             "--show" => show = true,
-            s if s.starts_with('-') => {
-                eprintln!("envstow get: unknown flag '{s}'");
-                return 2;
-            }
+            s if s.starts_with('-') => return Err(AppError::usage(format!("unknown flag '{s}'"))),
             s => {
                 if name.is_some() {
-                    eprintln!("envstow get: expected a single NAME");
-                    return 2;
+                    return Err(AppError::usage("expected a single NAME"));
                 }
                 name = Some(s);
             }
         }
     }
     let Some(name) = name else {
-        eprintln!("envstow get: usage: envstow get <NAME> [--profile P] [--show]");
-        return 2;
+        return Err(AppError::usage(
+            "usage: envstow get <NAME> [--profile P] [--show]",
+        ));
     };
 
-    let secrets = match load_secrets(&profile) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+    let secrets = load_secrets(&profile)?;
 
     // `secrets` (and thus every value, including the one we print below) is zeroized when it drops
     // at the end of this function — no manual scrubbing needed.
     let Some(value) = secrets.get(name) else {
-        eprintln!("envstow: no secret named '{name}'");
-        return 1;
+        return Err(AppError::msg(format!("no secret named '{name}'")));
     };
 
     let reveal = show || (!under_agent() && !io::stdout().is_terminal());
@@ -335,7 +345,7 @@ fn cmd_get(args: &[String]) -> i32 {
              or pass --show to reveal."
         );
     }
-    0
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -345,42 +355,32 @@ fn cmd_get(args: &[String]) -> i32 {
 /// `envstow set <NAME>` — read a value from STDIN (never argv) and store it under NAME,
 /// re-encrypting the store. Reading from stdin keeps the literal value off the command line.
 /// `--clipboard` reads the OS clipboard instead of stdin (same guarantee: never in argv).
-fn cmd_set(args: &[String]) -> i32 {
-    let (profile, args) = match resolve_profile(args) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow set: {e}");
-            return 2;
-        }
-    };
+fn cmd_set(args: &[String]) -> Cmd {
+    let (profile, args) = resolve_profile(args)?;
     let mut from_clipboard = false;
     let mut name: Option<&str> = None;
     for a in &args {
         match a.as_str() {
             "--clipboard" | "-c" => from_clipboard = true,
-            s if s.starts_with('-') => {
-                eprintln!("envstow set: unknown flag '{s}'");
-                return 2;
-            }
+            s if s.starts_with('-') => return Err(AppError::usage(format!("unknown flag '{s}'"))),
             s => {
                 if name.is_some() {
-                    eprintln!("envstow set: expected a single NAME");
-                    return 2;
+                    return Err(AppError::usage("expected a single NAME"));
                 }
                 name = Some(s);
             }
         }
     }
     let Some(name) = name else {
-        eprintln!(
-            "envstow set: usage: envstow set <NAME> [--profile P] [--clipboard]   (then type the \
-             value + Enter, or pipe it: `printf '%s' value | envstow set <NAME>`)"
-        );
-        return 2;
+        return Err(AppError::usage(
+            "usage: envstow set <NAME> [--profile P] [--clipboard]   (then type the value + \
+             Enter, or pipe it: `printf '%s' value | envstow set <NAME>`)",
+        ));
     };
     if name.contains('=') || name.trim().is_empty() {
-        eprintln!("envstow set: NAME must be non-empty and contain no '='.");
-        return 2;
+        return Err(AppError::usage(
+            "NAME must be non-empty and contain no '='.",
+        ));
     }
     let name = name.to_string();
     let name = &name;
@@ -390,31 +390,22 @@ fn cmd_set(args: &[String]) -> i32 {
     //   * interactive TTY (you typing): prompt, then read ONE line — finishes on Enter.
     //   * piped (`printf … | envstow set`): read ALL of stdin, so multi-line values survive.
     let mut value = String::new();
-    let read = if from_clipboard {
-        match read_clipboard() {
-            Ok(v) => {
-                value = v;
-                Ok(0)
-            }
-            Err(e) => {
-                eprintln!("envstow set: {e}");
-                return 1;
-            }
-        }
-    } else if io::stdin().is_terminal() {
-        eprint!("Enter value for {name} (press Enter to finish): ");
-        let _ = io::stderr().flush();
-        io::stdin().read_line(&mut value)
+    if from_clipboard {
+        value = read_clipboard()?;
     } else {
-        io::stdin().read_to_string(&mut value)
-    };
-    if read.is_err() {
-        eprintln!("envstow set: could not read value from stdin.");
-        return 1;
+        let read = if io::stdin().is_terminal() {
+            eprint!("Enter value for {name} (press Enter to finish): ");
+            let _ = io::stderr().flush();
+            io::stdin().read_line(&mut value)
+        } else {
+            io::stdin().read_to_string(&mut value)
+        };
+        if read.is_err() {
+            return Err(AppError::msg("could not read value from stdin."));
+        }
     }
     if from_clipboard && value.is_empty() {
-        eprintln!("envstow set: the clipboard is empty — nothing to store.");
-        return 1;
+        return Err(AppError::msg("the clipboard is empty — nothing to store."));
     }
     // Trim a single trailing newline (the Enter keystroke, or a trailing newline from `echo`).
     if value.ends_with('\n') {
@@ -424,20 +415,20 @@ fn cmd_set(args: &[String]) -> i32 {
         }
     }
 
+    // From here `value` holds plaintext. On the two fallible steps before it's moved into the
+    // store, scrub it explicitly on failure (a bare `?` would skip that).
     let paths = match layout::locate(&profile) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("envstow: {e}");
             value.zeroize();
-            return 1;
+            return Err(e.into());
         }
     };
     let mut secrets = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("envstow: {e}");
             value.zeroize();
-            return 1;
+            return Err(e);
         }
     };
 
@@ -454,12 +445,10 @@ fn cmd_set(args: &[String]) -> i32 {
     // in, so nothing left here to zeroize; `secrets` scrubs everything on drop.
     secrets.upsert(name, value);
 
-    let code = write_secrets(&paths.recipients, &paths.store, &secrets);
-    if code == 0 {
-        eprintln!("✔  set {name} ({preview})");
-        nudge_if_unlocked_shell();
-    }
-    code
+    write_secrets(&paths.recipients, &paths.store, &secrets)?;
+    eprintln!("✔  set {name} ({preview})");
+    nudge_if_unlocked_shell();
+    Ok(())
 }
 
 /// The platform's clipboard-paste commands, tried in order until one runs. Each writes the
@@ -530,55 +519,33 @@ fn read_clipboard() -> Result<String, String> {
 /// Deleting a name only removes it going FORWARD. The value stays readable in every historical
 /// commit of the store to anyone who is (or was) a recipient, so a deleted secret is not a
 /// revoked one — hence the rotate reminder, mirroring `remove-recipient`.
-fn cmd_delete(args: &[String]) -> i32 {
-    let (profile, args) = match resolve_profile(args) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow delete: {e}");
-            return 2;
-        }
-    };
+fn cmd_delete(args: &[String]) -> Cmd {
+    let (profile, args) = resolve_profile(args)?;
     let mut force = false;
     let mut name: Option<&str> = None;
     for a in &args {
         match a.as_str() {
             "--force" | "-f" => force = true,
-            s if s.starts_with('-') => {
-                eprintln!("envstow delete: unknown flag '{s}'");
-                return 2;
-            }
+            s if s.starts_with('-') => return Err(AppError::usage(format!("unknown flag '{s}'"))),
             s => {
                 if name.is_some() {
-                    eprintln!("envstow delete: expected a single NAME");
-                    return 2;
+                    return Err(AppError::usage("expected a single NAME"));
                 }
                 name = Some(s);
             }
         }
     }
     let Some(name) = name else {
-        eprintln!("envstow delete: usage: envstow delete <NAME> [--profile P] [--force]");
-        return 2;
+        return Err(AppError::usage(
+            "usage: envstow delete <NAME> [--profile P] [--force]",
+        ));
     };
 
-    let paths = match layout::locate(&profile) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
-    let mut secrets = match load_secrets(&profile) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+    let paths = layout::locate(&profile)?;
+    let mut secrets = load_secrets(&profile)?;
 
     if !secrets.contains(name) {
-        eprintln!("envstow: no secret named '{name}'");
-        return 1;
+        return Err(AppError::msg(format!("no secret named '{name}'")));
     }
 
     // Confirm on a TTY: deleting is destructive and the value is unrecoverable from the store
@@ -591,136 +558,73 @@ fn cmd_delete(args: &[String]) -> i32 {
         let confirmed = io::stdin().read_line(&mut input).is_ok()
             && matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes");
         if !confirmed {
-            eprintln!("   aborted — store left unchanged.");
-            return 1;
+            return Err(AppError::msg("aborted — store left unchanged."));
         }
     }
 
     // Drop the entry (its value is zeroized as it leaves the store).
     secrets.remove(name);
 
-    let code = write_secrets(&paths.recipients, &paths.store, &secrets);
-    if code == 0 {
-        eprintln!("✔  deleted {name}");
-        eprintln!(
-            "\n⚠️  Deleting only removes it going forward. The value is still readable in this\n\
-             \x20   store's git history by anyone who is (or was) a recipient. Rotate it at the\n\
-             \x20   source if it should no longer be valid."
-        );
-        nudge_if_unlocked_shell();
-    }
-    code
+    write_secrets(&paths.recipients, &paths.store, &secrets)?;
+    eprintln!("✔  deleted {name}");
+    eprintln!(
+        "\n⚠️  Deleting only removes it going forward. The value is still readable in this\n\
+         \x20   store's git history by anyone who is (or was) a recipient. Rotate it at the\n\
+         \x20   source if it should no longer be valid."
+    );
+    nudge_if_unlocked_shell();
+    Ok(())
 }
 
 /// `envstow list` — print the variable NAMES in the store (never values).
-fn cmd_list(args: &[String]) -> i32 {
-    let (profile, _args) = match resolve_profile(args) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow list: {e}");
-            return 2;
-        }
-    };
-    let secrets = match load_secrets(&profile) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+fn cmd_list(args: &[String]) -> Cmd {
+    let (profile, _args) = resolve_profile(args)?;
+    let secrets = load_secrets(&profile)?;
     for name in secrets.names() {
         println!("{name}");
     }
-    0
+    Ok(())
 }
 
 /// `envstow pubkey` — print YOUR age public key (derived from your identity), so you can share
 /// it with a collaborator who will `add-recipient` it. The public key is not a secret; it is
 /// always safe to print, even under an agent.
-fn cmd_pubkey() -> i32 {
-    let secret = match layout::read_identity_secret() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
-    match crypto::public_from_secret(&secret) {
-        Ok(public) => {
-            println!("{public}");
-            0
-        }
-        Err(e) => {
-            eprintln!("envstow: identity is unreadable: {e}");
-            1
-        }
-    }
+fn cmd_pubkey() -> Cmd {
+    let secret = layout::read_identity_secret()?;
+    let public = crypto::public_from_secret(&secret)
+        .map_err(|e| AppError::msg(format!("identity is unreadable: {e}")))?;
+    println!("{public}");
+    Ok(())
 }
 
 /// Serialize `secrets` to dotenv, encrypt to the current recipients, and write the store.
 /// Zeroizes the plaintext payload buffer; the caller's `Secrets` scrubs its own values on drop.
-fn write_secrets(recipients_path: &Path, store: &Path, secrets: &Secrets) -> i32 {
+fn write_secrets(recipients_path: &Path, store: &Path, secrets: &Secrets) -> Cmd {
     let recipients = layout::read_recipients(recipients_path).unwrap_or_default();
     if recipients.is_empty() {
-        eprintln!("envstow: no recipients — cannot encrypt.");
-        return 1;
+        return Err(AppError::msg("no recipients — cannot encrypt."));
     }
-    let recips = match parse_all_recipients(&recipients) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+    let recips = parse_all_recipients(&recipients)?;
 
     // Multi-line values are stored base64-encoded (see crypto::encode_value), so the dotenv
     // store stays one line per key. render_dotenv applies the encoding.
     let mut payload = render_dotenv(secrets.pairs());
-
     let result = crypto::encrypt(payload.as_bytes(), &recips);
     payload.zeroize();
+    let ct = result?; // CryptoError -> "encryption failed: {e}"
 
-    match result {
-        Ok(ct) => match layout::write_store(store, &ct) {
-            Ok(()) => 0,
-            Err(e) => {
-                eprintln!("envstow: could not write store: {e}");
-                1
-            }
-        },
-        Err(e) => {
-            eprintln!("envstow: encryption failed: {e}");
-            1
-        }
-    }
+    layout::write_store(store, &ct)
+        .map_err(|e| AppError::msg(format!("could not write store: {e}")))
 }
 
 /// `envstow edit` — decrypt the store to a private temp file, open `$EDITOR` on it, then
 /// re-encrypt the edited dotenv back to the store. The plaintext temp file is created 0600 in
 /// the user's config dir, overwritten with zeros, and removed on exit (success or failure).
-fn cmd_edit(args: &[String]) -> i32 {
-    let (profile, _args) = match resolve_profile(args) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow edit: {e}");
-            return 2;
-        }
-    };
-    let paths = match layout::locate(&profile) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+fn cmd_edit(args: &[String]) -> Cmd {
+    let (profile, _args) = resolve_profile(args)?;
+    let paths = layout::locate(&profile)?;
     // Decrypt current contents to text.
-    let secrets = match load_secrets(&profile) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+    let secrets = load_secrets(&profile)?;
     let mut initial = render_dotenv(secrets.pairs());
     drop(secrets); // scrub the decrypted values now; the plaintext lives on only in `initial`
 
@@ -734,8 +638,7 @@ fn cmd_edit(args: &[String]) -> i32 {
     }
     if let Err(e) = write_private_file(&tmp, initial.as_bytes()) {
         initial.zeroize();
-        eprintln!("envstow: could not create temp file: {e}");
-        return 1;
+        return Err(AppError::msg(format!("could not create temp file: {e}")));
     }
     initial.zeroize();
 
@@ -745,40 +648,30 @@ fn cmd_edit(args: &[String]) -> i32 {
         .unwrap_or_else(|| OsString::from(if cfg!(windows) { "notepad" } else { "vi" }));
     let status = Command::new(&editor).arg(&tmp).status();
 
-    let code = match status {
-        Ok(s) if s.success() => {
-            // Re-read, parse, re-encrypt.
-            match std::fs::read_to_string(&tmp) {
-                Ok(mut edited) => {
-                    let new_secrets = Secrets::from_pairs(crypto::parse_dotenv(&edited));
-                    edited.zeroize();
-                    write_secrets(&paths.recipients, &paths.store, &new_secrets)
-                }
-                Err(e) => {
-                    eprintln!("envstow: could not read edited file: {e}");
-                    1
-                }
+    // Re-encrypt on a clean editor exit; the temp file is shredded either way (below).
+    let result: Cmd = match status {
+        Ok(s) if s.success() => match std::fs::read_to_string(&tmp) {
+            Ok(mut edited) => {
+                let new_secrets = Secrets::from_pairs(crypto::parse_dotenv(&edited));
+                edited.zeroize();
+                write_secrets(&paths.recipients, &paths.store, &new_secrets)
             }
-        }
-        Ok(_) => {
-            eprintln!("envstow: editor exited non-zero — store left unchanged.");
-            1
-        }
-        Err(e) => {
-            eprintln!(
-                "envstow: could not launch editor '{}': {e}",
-                editor.to_string_lossy()
-            );
-            1
-        }
+            Err(e) => Err(AppError::msg(format!("could not read edited file: {e}"))),
+        },
+        Ok(_) => Err(AppError::msg(
+            "editor exited non-zero — store left unchanged.",
+        )),
+        Err(e) => Err(AppError::msg(format!(
+            "could not launch editor '{}': {e}",
+            editor.to_string_lossy()
+        ))),
     };
 
     shred_and_remove(&tmp);
-    if code == 0 {
-        eprintln!("✔  store updated.");
-        nudge_if_unlocked_shell();
-    }
-    code
+    result?;
+    eprintln!("✔  store updated.");
+    nudge_if_unlocked_shell();
+    Ok(())
 }
 
 /// Write `bytes` to `path`, creating it 0600 on Unix (best-effort on Windows).
@@ -828,30 +721,17 @@ fn shred_and_remove(path: &Path) {
 /// `envstow unlock [-- <cmd>...]` — decrypt the whole store and set every value as an env var
 /// for a spawned child (an interactive subshell, or the given command). Values never printed;
 /// only variable NAMES are listed.
-fn cmd_unlock(args: &[String]) -> i32 {
-    let (profile, args) = match resolve_profile(args) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow unlock: {e}");
-            return 2;
-        }
-    };
+fn cmd_unlock(args: &[String]) -> Cmd {
+    let (profile, args) = resolve_profile(args)?;
     // Everything after `--` (or all args) is the command to run; empty → interactive subshell.
     let cmd: Vec<String> = match args.iter().position(|a| a == "--") {
         Some(i) => args[i + 1..].to_vec(),
         None => args.to_vec(),
     };
 
-    let secrets = match load_secrets(&profile) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+    let secrets = load_secrets(&profile)?;
     if secrets.is_empty() {
-        eprintln!("envstow: store decrypted but contains no variables.");
-        return 1;
+        return Err(AppError::msg("store decrypted but contains no variables."));
     }
 
     let names: Vec<&str> = secrets.names().collect();
@@ -980,33 +860,19 @@ fn loaded_names() -> Vec<String> {
 ///
 /// Only names in `ENVSTOW_LOADED` are considered, so a `DATABASE_URL` from your shell rc is never
 /// touched — envstow only unsets what it set.
-fn cmd_refresh(args: &[String]) -> i32 {
-    let (profile, args) = match resolve_profile(args) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow refresh: {e}");
-            return 2;
-        }
-    };
+fn cmd_refresh(args: &[String]) -> Cmd {
+    let (profile, args) = resolve_profile(args)?;
     if let Some(a) = args.first() {
-        eprintln!("envstow refresh: unexpected argument '{a}'");
-        return 2;
+        return Err(AppError::usage(format!("unexpected argument '{a}'")));
     }
     if env::var_os("ENVSTOW_UNLOCKED").is_none() {
-        eprintln!(
-            "envstow refresh: not inside an `envstow unlock` shell — nothing to refresh.\n\
-             \x20  (refresh clears secrets this shell still holds after they left the store.)"
-        );
-        return 1;
+        return Err(AppError::msg(
+            "not inside an `envstow unlock` shell — nothing to refresh.\n\
+             \x20  (refresh clears secrets this shell still holds after they left the store.)",
+        ));
     }
 
-    let secrets = match load_secrets(&profile) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+    let secrets = load_secrets(&profile)?;
 
     // Stale = envstow set it here, and the store no longer has it. Note we compare against the
     // names WE recorded, not the whole environment, so we never unset someone else's var.
@@ -1065,7 +931,7 @@ fn cmd_refresh(args: &[String]) -> i32 {
              refresh can't update them without printing values — run `exit` then `envstow unlock`."
         );
     }
-    0
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1179,7 +1045,7 @@ fn install_receipt() -> Option<String> {
 /// desynchronizes it from the package manager's database (`brew doctor` complains; pacman
 /// considers it hostile), or drops a second envstow on PATH that may shadow the managed one.
 /// When there's no cargo-dist receipt, we say who should do the updating instead.
-fn cmd_upgrade(args: &[String]) -> i32 {
+fn cmd_upgrade(args: &[String]) -> Cmd {
     let mut check_only = false;
     let mut yes = false;
     for a in args {
@@ -1187,52 +1053,41 @@ fn cmd_upgrade(args: &[String]) -> i32 {
             "--check" => check_only = true,
             "--yes" | "-y" => yes = true,
             s => {
-                eprintln!("envstow upgrade: unknown argument '{s}'");
-                eprintln!("usage: envstow upgrade [--check] [--yes]");
-                return 2;
+                return Err(AppError::usage(format!(
+                    "unknown argument '{s}'\nusage: envstow upgrade [--check] [--yes]"
+                )));
             }
         }
     }
 
     let current = env!("CARGO_PKG_VERSION");
-    let latest = match latest_version() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+    let latest = latest_version()?;
 
     if !version_is_newer(&latest, current) {
         eprintln!("✔  envstow {current} is up to date (latest: {latest}).");
-        return 0;
+        return Ok(());
     }
     eprintln!("⬆️  envstow {latest} is available (you have {current}).");
     eprintln!("   {}/releases/tag/v{latest}", layout::REPO_URL);
 
     if check_only {
-        return 0;
+        return Ok(());
     }
 
     // Only self-update an install we own.
-    match install_receipt().as_deref() {
-        Some("cargo-dist") => {}
-        Some(_) | None => {
-            eprintln!(
-                "\nenvstow: this copy wasn't installed by the envstow installer, so `update` \
-                 won't touch it\n\
-                 \x20  (no cargo-dist receipt at {}).\n\
-                 \x20  Update it with whatever installed it — e.g. `brew upgrade envstow`, your \
-                 distro's\n\
-                 \x20  package manager, or `cargo install --path bin` from a fresh checkout.",
-                layout::identity_path()
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .join("envstow-receipt.json")
-                    .display()
-            );
-            return 1;
-        }
+    if install_receipt().as_deref() != Some("cargo-dist") {
+        return Err(AppError::msg(format!(
+            "this copy wasn't installed by the envstow installer, so `update` won't touch it\n\
+             \x20  (no cargo-dist receipt at {}).\n\
+             \x20  Update it with whatever installed it — e.g. `brew upgrade envstow`, your \
+             distro's\n\
+             \x20  package manager, or `cargo install --path crates/envstow` from a fresh checkout.",
+            layout::identity_path()
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join("envstow-receipt.json")
+                .display()
+        )));
     }
 
     // Confirm before replacing the binary. Unlike `init`'s skill prompt, a non-interactive run
@@ -1241,11 +1096,10 @@ fn cmd_upgrade(args: &[String]) -> i32 {
     // be a nasty surprise. Non-TTY callers must opt in with --yes.
     if !yes {
         if !io::stdin().is_terminal() {
-            eprintln!(
-                "\nenvstow: refusing to update non-interactively — pass `--yes` to confirm:\n\
-                 \x20  envstow upgrade --yes"
-            );
-            return 1;
+            return Err(AppError::msg(
+                "refusing to update non-interactively — pass `--yes` to confirm:\n\
+                 \x20  envstow upgrade --yes",
+            ));
         }
         eprint!("Download and install envstow {latest}? [Y/n] ");
         let _ = io::stderr().flush();
@@ -1254,59 +1108,50 @@ fn cmd_upgrade(args: &[String]) -> i32 {
             let ans = input.trim().to_ascii_lowercase();
             if ans == "n" || ans == "no" {
                 eprintln!("   skipped.");
-                return 0;
+                return Ok(());
             }
         }
     }
 
     // Windows installs via the PowerShell installer; there's no `sh` to pipe through, so we print
-    // the command instead of running it. (Both arms are the tail of the fn, so no `return`.)
+    // the command instead of running it.
     #[cfg(windows)]
     {
         eprintln!(
             "\nenvstow: run the PowerShell installer to upgrade:\n\
              \x20  powershell -c \"irm https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.ps1 | iex\""
         );
-        0
+        Ok(())
     }
 
     #[cfg(not(windows))]
     {
         eprintln!("   running the official installer…");
-        // Exactly the pipeline the README documents — same URL, same TLS pinning. We're only saving
-        // you from having to remember it.
+        // Exactly the pipeline the README documents — same URL, same TLS pinning. We're only
+        // saving you from having to remember it.
         let status = Command::new("sh")
             .arg("-c")
             .arg(format!(
                 "curl --proto '=https' --tlsv1.2 -LsSf {INSTALLER_URL} | sh"
             ))
-            .status();
-        match status {
-            Ok(s) if s.success() => {
-                eprintln!(
-                    "✔  updated to envstow {latest}. Open a new shell (or `hash -r`) to use it."
-                );
-                0
-            }
-            Ok(s) => {
-                eprintln!(
-                    "envstow: the installer exited with {}. Try it by hand:\n\
+            .status()
+            .map_err(|e| AppError::msg(format!("could not run the installer: {e}")))?;
+        if status.success() {
+            eprintln!("✔  updated to envstow {latest}. Open a new shell (or `hash -r`) to use it.");
+            Ok(())
+        } else {
+            Err(AppError::msg(format!(
+                "the installer exited with {}. Try it by hand:\n\
                  \x20  curl --proto '=https' --tlsv1.2 -LsSf {INSTALLER_URL} | sh",
-                    s.code().unwrap_or(-1)
-                );
-                1
-            }
-            Err(e) => {
-                eprintln!("envstow: could not run the installer: {e}");
-                1
-            }
+                status.code().unwrap_or(-1)
+            )))
         }
     }
 }
 
 /// Spawn either the given command or an interactive subshell, with the secrets in its env.
 /// `secrets` scrubs its values on drop, after the child has its own copy. Returns the exit code.
-fn spawn_with_env(cmd: &[String], secrets: Secrets) -> i32 {
+fn spawn_with_env(cmd: &[String], secrets: Secrets) -> Cmd {
     let (program, args, interactive) = if cmd.is_empty() {
         let (sh, sh_args) = default_shell();
         eprintln!("🔓 envstow: launching unlocked subshell. Type `exit` to lock.");
@@ -1336,26 +1181,27 @@ fn spawn_with_env(cmd: &[String], secrets: Secrets) -> i32 {
         .stderr(Stdio::inherit());
 
     // The child inherits a copy of our env at spawn; our `secrets` scrubs on drop (function end).
-    let result = command.spawn();
-
-    let code = match result {
+    match command.spawn() {
         Ok(mut child) => match child.wait() {
-            Ok(status) => status.code().unwrap_or(if interactive { 0 } else { 1 }),
-            Err(e) => {
-                eprintln!("envstow: error waiting for child: {e}");
-                1
+            Ok(status) => {
+                // Propagate the child's own exit code as ours, silently — it already printed
+                // whatever it printed. A child killed by a signal (no code) is 0 for an
+                // interactive subshell (you `exit`ed), 1 otherwise.
+                let code = status.code().unwrap_or(if interactive { 0 } else { 1 });
+                if code == 0 {
+                    Ok(())
+                } else {
+                    Err(AppError::silent(code))
+                }
             }
+            Err(e) => Err(AppError::msg(format!("error waiting for child: {e}"))),
         },
-        Err(e) => {
-            eprintln!(
-                "envstow: failed to launch '{}': {e}",
-                program.to_string_lossy()
-            );
-            127
-        }
-    };
-
-    code
+        Err(e) => Err(AppError::msg(format!(
+            "failed to launch '{}': {e}",
+            program.to_string_lossy()
+        ))
+        .with_code(127)),
+    }
 }
 
 #[cfg(unix)]
@@ -1380,7 +1226,7 @@ fn default_shell() -> (OsString, Vec<OsString>) {
 /// `envstow init` — generate an age identity (if none), create the `recipients` file with the
 /// user as sole recipient (if none), and create an empty encrypted store (if none). Idempotent.
 /// Also offers to add the Claude Code agent skill to this repo (`--no-skill` to skip).
-fn cmd_init(args: &[String]) -> i32 {
+fn cmd_init(args: &[String]) -> Cmd {
     let skip_skill = args.iter().any(|a| a == "--no-skill");
 
     // 1. Identity: reuse an existing one, else generate and write it.
@@ -1394,8 +1240,9 @@ fn cmd_init(args: &[String]) -> i32 {
                 p
             }
             Err(e) => {
-                eprintln!("envstow: existing identity is unreadable: {e}");
-                return 1;
+                return Err(AppError::msg(format!(
+                    "existing identity is unreadable: {e}"
+                )));
             }
         },
         Err(_) => {
@@ -1404,8 +1251,7 @@ fn cmd_init(args: &[String]) -> i32 {
                 Ok(path) => eprintln!("✔  generated identity at {}", path.display()),
                 Err(e) => {
                     secret.zeroize();
-                    eprintln!("envstow: could not write identity: {e}");
-                    return 1;
+                    return Err(AppError::msg(format!("could not write identity: {e}")));
                 }
             }
             secret.zeroize();
@@ -1418,8 +1264,10 @@ fn cmd_init(args: &[String]) -> i32 {
     let root = env::current_dir().unwrap_or_else(|_| ".".into());
     // Ensure the .envstow/ dir exists before we write into it.
     if let Err(e) = std::fs::create_dir_all(root.join(layout::ENVSTOW_DIR)) {
-        eprintln!("envstow: could not create {}: {e}", layout::ENVSTOW_DIR);
-        return 1;
+        return Err(AppError::msg(format!(
+            "could not create {}: {e}",
+            layout::ENVSTOW_DIR
+        )));
     }
     let recipients_path = root.join(layout::RECIPIENTS_FILE);
     let mut recipients = if recipients_path.is_file() {
@@ -1449,8 +1297,9 @@ fn cmd_init(args: &[String]) -> i32 {
             label: Some("me".to_string()),
         });
         if let Err(e) = std::fs::write(&recipients_path, layout::render_recipients(&recipients)) {
-            eprintln!("envstow: could not write recipients file: {e}");
-            return 1;
+            return Err(AppError::msg(format!(
+                "could not write recipients file: {e}"
+            )));
         }
         eprintln!("✔  added you to {}", recipients_path.display());
     }
@@ -1464,14 +1313,14 @@ fn cmd_init(args: &[String]) -> i32 {
         match encrypt_payload(seed, &recipients) {
             Ok(ct) => {
                 if let Err(e) = layout::write_store(&store_path, &ct) {
-                    eprintln!("envstow: could not write store: {e}");
-                    return 1;
+                    return Err(AppError::msg(format!("could not write store: {e}")));
                 }
                 eprintln!("✔  created empty store at {}", store_path.display());
             }
             Err(e) => {
-                eprintln!("envstow: could not encrypt initial store: {e}");
-                return 1;
+                return Err(AppError::msg(format!(
+                    "could not encrypt initial store: {e}"
+                )));
             }
         }
     }
@@ -1500,7 +1349,7 @@ fn cmd_init(args: &[String]) -> i32 {
         eprintln!("\n🔓 Ready. Add secrets by editing the store, then `envstow unlock`.");
         eprintln!("   Share your public key with collaborators so they can add you.");
     }
-    0
+    Ok(())
 }
 
 /// The agent skill content, embedded at compile time so the binary can write it into any repo
@@ -1557,37 +1406,26 @@ fn maybe_install_skill(repo_root: &Path) {
 // recipient management
 // ---------------------------------------------------------------------------
 
-fn cmd_add_recipient(args: &[String]) -> i32 {
-    let (profile, args) = match resolve_profile(args) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow add-recipient: {e}");
-            return 2;
-        }
-    };
+fn cmd_add_recipient(args: &[String]) -> Cmd {
+    let (profile, args) = resolve_profile(args)?;
     let Some(key) = args.first() else {
-        eprintln!(
-            "envstow add-recipient: usage: envstow add-recipient <age1...> [label] [--profile P]"
-        );
-        return 2;
+        return Err(AppError::usage(
+            "usage: envstow add-recipient <age1...> [label] [--profile P]",
+        ));
     };
     if crypto::parse_recipient(key).is_err() {
-        eprintln!("envstow: '{key}' is not a valid age public key (expected age1...).");
-        return 1;
+        return Err(AppError::msg(format!(
+            "'{key}' is not a valid age public key (expected age1...)."
+        )));
     }
     let label = args.get(1).cloned();
 
-    let paths = match layout::locate(&profile) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+    let paths = layout::locate(&profile)?;
     let mut recipients = layout::read_recipients(&paths.recipients).unwrap_or_default();
     if recipients.iter().any(|r| &r.key == key) {
+        // Already present is not an error — nothing to do.
         eprintln!("envstow: {key} is already a recipient.");
-        return 0;
+        return Ok(());
     }
     recipients.push(Recipient {
         key: key.clone(),
@@ -1595,33 +1433,23 @@ fn cmd_add_recipient(args: &[String]) -> i32 {
     });
 
     if let Err(e) = std::fs::write(&paths.recipients, layout::render_recipients(&recipients)) {
-        eprintln!("envstow: could not update recipients file: {e}");
-        return 1;
+        return Err(AppError::msg(format!(
+            "could not update recipients file: {e}"
+        )));
     }
     eprintln!("✔  added recipient to {}", paths.recipients.display());
     reencrypt_store(&paths.store, &recipients)
 }
 
-fn cmd_remove_recipient(args: &[String]) -> i32 {
-    let (profile, args) = match resolve_profile(args) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow remove-recipient: {e}");
-            return 2;
-        }
-    };
+fn cmd_remove_recipient(args: &[String]) -> Cmd {
+    let (profile, args) = resolve_profile(args)?;
     let Some(target) = args.first() else {
-        eprintln!("envstow remove-recipient: usage: envstow remove-recipient <age1...|label> [--profile P]");
-        return 2;
+        return Err(AppError::usage(
+            "usage: envstow remove-recipient <age1...|label> [--profile P]",
+        ));
     };
 
-    let paths = match layout::locate(&profile) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+    let paths = layout::locate(&profile)?;
     let recipients = layout::read_recipients(&paths.recipients).unwrap_or_default();
 
     let matches: Vec<&Recipient> = recipients
@@ -1629,15 +1457,13 @@ fn cmd_remove_recipient(args: &[String]) -> i32 {
         .filter(|r| &r.key == target || r.label.as_deref() == Some(target.as_str()))
         .collect();
     if matches.is_empty() {
-        eprintln!("envstow: no recipient matching '{target}'.");
-        return 1;
+        return Err(AppError::msg(format!("no recipient matching '{target}'.")));
     }
     if matches.len() > 1 {
-        eprintln!(
-            "envstow: '{target}' matches {} recipients — pass the exact age key.",
+        return Err(AppError::msg(format!(
+            "'{target}' matches {} recipients — pass the exact age key.",
             matches.len()
-        );
-        return 1;
+        )));
     }
     let removed_key = matches[0].key.clone();
     let kept: Vec<Recipient> = recipients
@@ -1645,45 +1471,32 @@ fn cmd_remove_recipient(args: &[String]) -> i32 {
         .filter(|r| r.key != removed_key)
         .collect();
     if kept.is_empty() {
-        eprintln!("envstow: refusing to remove the last recipient (store would be unreadable).");
-        return 1;
+        return Err(AppError::msg(
+            "refusing to remove the last recipient (store would be unreadable).",
+        ));
     }
 
     if let Err(e) = std::fs::write(&paths.recipients, layout::render_recipients(&kept)) {
-        eprintln!("envstow: could not update recipients file: {e}");
-        return 1;
+        return Err(AppError::msg(format!(
+            "could not update recipients file: {e}"
+        )));
     }
     eprintln!("✔  removed recipient; {} remain.", kept.len());
-    let code = reencrypt_store(&paths.store, &kept);
-    if code == 0 {
-        eprintln!(
-            "\n⚠️  Removing a recipient only blocks FUTURE decryptions. Their key still decrypts\n\
-             every historical commit in any clone they kept. Rotate every secret they saw at the\n\
-             source to truly revoke access."
-        );
-    }
-    code
+    reencrypt_store(&paths.store, &kept)?;
+    eprintln!(
+        "\n⚠️  Removing a recipient only blocks FUTURE decryptions. Their key still decrypts\n\
+         every historical commit in any clone they kept. Rotate every secret they saw at the\n\
+         source to truly revoke access."
+    );
+    Ok(())
 }
 
-fn cmd_reencrypt(args: &[String]) -> i32 {
-    let (profile, _args) = match resolve_profile(args) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow reencrypt: {e}");
-            return 2;
-        }
-    };
-    let paths = match layout::locate(&profile) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+fn cmd_reencrypt(args: &[String]) -> Cmd {
+    let (profile, _args) = resolve_profile(args)?;
+    let paths = layout::locate(&profile)?;
     let recipients = layout::read_recipients(&paths.recipients).unwrap_or_default();
     if recipients.is_empty() {
-        eprintln!("envstow: recipients file has no keys.");
-        return 1;
+        return Err(AppError::msg("recipients file has no keys."));
     }
     reencrypt_store(&paths.store, &recipients)
 }
@@ -1694,18 +1507,16 @@ fn cmd_reencrypt(args: &[String]) -> i32 {
 
 /// `envstow profile [create <name>]` — show the current profile (and available ones), or create
 /// a new one. The current profile is resolved from ENVSTOW_PROFILE (or `default`).
-fn cmd_profile(args: &[String]) -> i32 {
+fn cmd_profile(args: &[String]) -> Cmd {
     // Subcommand: `profile create <name>`
     if args.first().map(String::as_str) == Some("create") {
         let Some(name) = args.get(1) else {
-            eprintln!("envstow profile create: usage: envstow profile create <name>");
-            return 2;
+            return Err(AppError::usage("usage: envstow profile create <name>"));
         };
         return profile_create(name);
     }
     if !args.is_empty() {
-        eprintln!("envstow profile: usage: envstow profile [create <name>]");
-        return 2;
+        return Err(AppError::usage("usage: envstow profile [create <name>]"));
     }
 
     // Show current + available.
@@ -1735,128 +1546,78 @@ fn cmd_profile(args: &[String]) -> i32 {
         }
         Err(_) => eprintln!("   (not inside an envstow repo)"),
     }
-    0
+    Ok(())
 }
 
 /// `envstow profiles` — list the profiles that exist in this repo.
-fn cmd_profiles() -> i32 {
-    let root = match layout::repo_root() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+fn cmd_profiles() -> Cmd {
+    let root = layout::repo_root()?;
     for p in layout::list_profiles(&root) {
         println!("{p}");
     }
-    0
+    Ok(())
 }
 
 /// Create an empty store for a new profile (encrypted to the current recipients).
-fn profile_create(name: &str) -> i32 {
+fn profile_create(name: &str) -> Cmd {
     if !layout::valid_profile_name(name) {
-        eprintln!("envstow: invalid profile name '{name}' (use letters, digits, - or _)");
-        return 2;
+        return Err(AppError::usage(format!(
+            "invalid profile name '{name}' (use letters, digits, - or _)"
+        )));
     }
     if name == layout::DEFAULT_PROFILE {
-        eprintln!("envstow: '{name}' is the default profile — it already exists after `init`.");
-        return 1;
+        return Err(AppError::msg(format!(
+            "'{name}' is the default profile — it already exists after `init`."
+        )));
     }
-    let paths = match layout::locate(name) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+    let paths = layout::locate(name)?;
     if paths.store.is_file() {
-        eprintln!(
-            "envstow: profile '{name}' already exists at {}",
+        return Err(AppError::msg(format!(
+            "profile '{name}' already exists at {}",
             paths.store.display()
-        );
-        return 1;
+        )));
     }
     let recipients = layout::read_recipients(&paths.recipients).unwrap_or_default();
     if recipients.is_empty() {
-        eprintln!("envstow: recipients file has no keys — run `envstow init` first.");
-        return 1;
+        return Err(AppError::msg(
+            "recipients file has no keys — run `envstow init` first.",
+        ));
     }
     let seed = format!("# envstow profile '{name}' -- KEY=value lines.\n");
-    match encrypt_payload(seed.as_bytes(), &recipients) {
-        Ok(ct) => {
-            if let Err(e) = layout::write_store(&paths.store, &ct) {
-                eprintln!("envstow: could not write store: {e}");
-                return 1;
-            }
-            eprintln!("✔  created profile '{name}' at {}", paths.store.display());
-            eprintln!("   use it with:  envstow --profile {name} set <NAME>   (or export ENVSTOW_PROFILE={name})");
-            0
-        }
-        Err(e) => {
-            eprintln!("envstow: could not create profile store: {e}");
-            1
-        }
-    }
+    let ct = encrypt_payload(seed.as_bytes(), &recipients)
+        .map_err(|e| AppError::msg(format!("could not create profile store: {e}")))?;
+    layout::write_store(&paths.store, &ct)
+        .map_err(|e| AppError::msg(format!("could not write store: {e}")))?;
+    eprintln!("✔  created profile '{name}' at {}", paths.store.display());
+    eprintln!(
+        "   use it with:  envstow --profile {name} set <NAME>   (or export ENVSTOW_PROFILE={name})"
+    );
+    Ok(())
 }
 
 /// Decrypt the store with our identity and re-encrypt it to `recipients`. Used after any change
 /// to the recipient set. Plaintext is zeroized.
-fn reencrypt_store(store: &Path, recipients: &[Recipient]) -> i32 {
-    let secret = match layout::read_identity_secret() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
-    let identity = match crypto::parse_identity(&secret) {
-        Ok(i) => i,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
-    let ciphertext = match layout::read_store(store) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
-    let mut plaintext = match crypto::decrypt(&ciphertext, &identity) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("envstow: {e}");
-            return 1;
-        }
-    };
+fn reencrypt_store(store: &Path, recipients: &[Recipient]) -> Cmd {
+    let secret = layout::read_identity_secret()?;
+    let identity = crypto::parse_identity(&secret)?;
+    let ciphertext = layout::read_store(store)?;
+    let mut plaintext = crypto::decrypt(&ciphertext, &identity)?;
 
     let recips = match parse_all_recipients(recipients) {
         Ok(r) => r,
         Err(e) => {
             plaintext.zeroize();
-            eprintln!("envstow: {e}");
-            return 1;
+            return Err(AppError::msg(e));
         }
     };
     let result = crypto::encrypt(&plaintext, &recips);
     plaintext.zeroize();
+    let ct = result.map_err(|e| AppError::msg(format!("re-encryption failed: {e}")))?;
 
-    match result {
-        Ok(ct) => {
-            if let Err(e) = layout::write_store(store, &ct) {
-                eprintln!("envstow: could not write store: {e}");
-                return 1;
-            }
-            eprintln!("✔  re-encrypted store to {} recipient(s).", recips.len());
-            0
-        }
-        Err(e) => {
-            eprintln!("envstow: re-encryption failed: {e}");
-            1
-        }
-    }
+    layout::write_store(store, &ct)
+        .map_err(|e| AppError::msg(format!("could not write store: {e}")))?;
+    eprintln!("✔  re-encrypted store to {} recipient(s).", recips.len());
+    Ok(())
 }
 
 /// Encrypt a plaintext payload to a recipient set (helper for init's empty store).
