@@ -2,6 +2,23 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.15
+
+### Security
+- **The output-guard hook now catches secrets it used to miss.** `scripts/redact-guard.sh`
+  previously flagged only env vars whose **name** matched a convention (`*_KEY`, `*_TOKEN`, …), so
+  a leaked `DATABASE_URL`, DSN, or connection string sailed through — the last line of defense was
+  silently partial. It now keys off `ENVSTOW_LOADED` (the exact names `unlock` set), so detection
+  is name-agnostic, and it matches multi-line values line by line (a leaked middle line of a PEM
+  no longer evades it). Detection moved into the Python pass for exact, multi-line-safe substring
+  matching. Short values (<8 chars) and non-raw/base64 encodings remain out of scope by design.
+  *(If you've copied the guard into your own repo per GUARDRAILS.md, re-copy it to get this.)*
+- **envstow warns when your identity key is readable by group/other** (Unix). It's created
+  `0600`, but permissions drift — a copy, a backup restore, a loose umask — and a world-readable
+  key decrypts every store you can. envstow now says so and prints the `chmod 600` fix, on any
+  command that reads the key. It warns rather than refuses, so a permission slip can't lock you
+  out of your own secrets.
+
 ## 0.1.14
 
 ### Changed

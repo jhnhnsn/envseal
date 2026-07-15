@@ -331,7 +331,10 @@ Three optional defense layers back this up — set them up in **your** repo by f
 - **Denylist** — deny `env`, `printenv`, `echo $*`, `set`, … (Claude Code `settings.json`, or
   Cursor's `beforeShellExecution` hook).
 - **Output guard** — a post-command hook (`scripts/redact-guard.sh`) that blocks any command
-  output containing a live secret value (raw or base64), regardless of the agent's judgment.
+  output containing a live secret value (raw or base64), regardless of the agent's judgment. It
+  keys off `ENVSTOW_LOADED` (the exact names `unlock` set), so it catches **any** secret —
+  `DATABASE_URL`, a DSN, a connection string — not just conventionally-named ones, and matches
+  multi-line values line by line.
 
 > Defense-in-depth, **not** a vault. It makes accidental exposure very unlikely. A human or
 > agent who deliberately runs `--show` will see the value — that's by design (you own the
@@ -350,8 +353,12 @@ casual/accidental AI exposure of values.
 
 **Does NOT protect:** a compromised dependency reading `process.env` at runtime; a determined
 process exfiltrating a live var; plaintext already in git history; retroactive access removal;
-a value someone deliberately reveals with `--show` or re-encodes to evade the redact-guard.
+a value someone deliberately reveals with `--show`, or re-encodes (hex, gzip, url) to evade the
+redact-guard, or that is shorter than 8 chars (skipped to avoid false positives).
 For those: rotate, and treat this as strong hygiene, not a vault.
+
+envstow warns (on Unix) if your identity key (`~/.config/envstow/identity.txt`) is readable by
+group or other — a loose key decrypts every store you can. Fix with `chmod 600`.
 
 ---
 

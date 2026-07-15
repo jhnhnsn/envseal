@@ -244,9 +244,39 @@ pub fn identity_path() -> PathBuf {
         .join("identity.txt")
 }
 
+/// Warn (once per invocation, to stderr) if the identity private key is readable by group or
+/// other. envstow creates it `0600`, but permissions drift — a copy, a restore from backup, or a
+/// loose umask can leave the key world-readable, and anyone who can read it decrypts every store
+/// you can. We warn rather than refuse (unlike `ssh`) so a permission slip can't lock you out of
+/// your own secrets; the message says exactly how to fix it. Never prints key contents.
+#[cfg(unix)]
+fn warn_if_identity_perms_loose(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(meta) = fs::metadata(path) {
+        let mode = meta.permissions().mode();
+        // Any group/other bit set (0o077) means someone besides the owner can read it.
+        if mode & 0o077 != 0 {
+            eprintln!(
+                "⚠️  envstow: your identity key is readable by others (mode {:o}) — {}\n\
+                 \x20  Anyone who can read it can decrypt every store you have access to. Fix it:\n\
+                 \x20    chmod 600 {}",
+                mode & 0o777,
+                path.display(),
+                path.display()
+            );
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn warn_if_identity_perms_loose(_path: &Path) {
+    // Windows: the key lives under %APPDATA%, which is already per-user; no POSIX mode to check.
+}
+
 /// Read the identity secret string (`AGE-SECRET-KEY-...`) from the identity file.
 pub fn read_identity_secret() -> Result<String, LayoutError> {
     let path = identity_path();
+    warn_if_identity_perms_loose(&path);
     let raw = fs::read_to_string(&path).map_err(|_| LayoutError::NoIdentity(path.clone()))?;
     // The file may be an age-keygen-style file with `# ` comment lines; take the first
     // AGE-SECRET-KEY line, else the first non-comment non-blank line.

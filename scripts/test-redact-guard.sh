@@ -49,4 +49,21 @@ run_case "blocks a base64-encoded secret" 2 \
 run_case "allows unrelated output" 0 \
   '{"tool_response":{"stdout":"build succeeded in 3.2s"}}'
 
+# 5. A secret whose NAME does NOT match the convention, but IS listed in
+#    ENVSTOW_LOADED, must still be blocked. This is the DATABASE_URL gap: the old
+#    name-only guard let it leak. ENVSTOW_LOADED makes the match name-agnostic.
+export DATABASE_URL="postgres://admin:hunter2SUPERSECRETvalue@db.prod/main"
+export ENVSTOW_LOADED="DATABASE_URL"
+run_case "blocks a non-conventionally-named secret via ENVSTOW_LOADED" 2 \
+  "$(printf '{"tool_response":{"stdout":"connecting to %s now"}}' "$DATABASE_URL")"
+unset ENVSTOW_LOADED
+
+# 6. A MULTI-LINE secret must be caught even when only its middle (sensitive)
+#    line leaks — the old line-oriented grep matched only the first line.
+export TLS_KEY=$'-----BEGIN-----\nMIISECRETMIDDLELINExyz0000\n-----END-----'
+export ENVSTOW_LOADED="TLS_KEY"
+run_case "blocks the middle line of a multi-line secret" 2 \
+  '{"tool_response":{"stdout":"exfiltrated: MIISECRETMIDDLELINExyz0000"}}'
+unset ENVSTOW_LOADED TLS_KEY DATABASE_URL
+
 exit "$fail"

@@ -1140,6 +1140,42 @@ fn edit_updates_the_store() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_world_readable_identity_key_warns() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = Repo::new("keyperms");
+    assert_eq!(repo.run(&["init", "--no-skill"], "").code, 0);
+    assert_eq!(repo.run(&["set", "TOK"], "sk-value-abc123").code, 0);
+
+    // init makes the key 0600; simulate drift to group/other-readable.
+    std::fs::set_permissions(&repo.identity, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let out = repo.run(&["list"], "");
+    assert_eq!(out.code, 0, "should still work, just warn: {}", out.stderr);
+    assert!(
+        out.stderr.contains("readable by others") && out.stderr.contains("chmod 600"),
+        "a loose-perms identity should warn with the fix: {}",
+        out.stderr
+    );
+
+    // The warning must go to stderr only — a `$(envstow get ...)` capture must stay clean.
+    assert!(
+        !out.stdout.contains("readable by others"),
+        "warning must not pollute stdout: {:?}",
+        out.stdout
+    );
+
+    // A correctly-locked key is silent.
+    std::fs::set_permissions(&repo.identity, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let quiet = repo.run(&["list"], "");
+    assert!(
+        !quiet.stderr.contains("readable by others"),
+        "0600 key must not warn: {}",
+        quiet.stderr
+    );
+}
+
 #[test]
 fn a_newcomer_is_told_how_to_get_access_not_just_that_it_failed() {
     // The most common first-run failure: installed envstow, cloned the repo, nobody's added you.
