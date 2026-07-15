@@ -32,11 +32,16 @@ use std::process::{Command, Stdio};
 
 use zeroize::Zeroize;
 
+mod agent;
+mod cli;
 mod crypto;
 mod error;
 mod layout;
 mod secrets;
+mod selfupdate;
 
+use agent::{mask, masked_preview, under_agent};
+use cli::{parse_simple, resolve_profile};
 use error::AppError;
 use layout::Recipient;
 use secrets::Secrets;
@@ -91,7 +96,7 @@ fn main() {
         // update, brew upgrade, rustup update). envstow manages secrets, so `update` is kept
         // free for that sense — and accepted here as an undocumented alias for anyone who used
         // it in 0.1.12, the one release where it was the real name.
-        Some("upgrade") | Some("update") => cmd_upgrade(&args[1..]),
+        Some("upgrade") | Some("update") => selfupdate::cmd_upgrade(&args[1..]),
         Some("init") => cmd_init(&args[1..]),
         Some("add-recipient") => cmd_add_recipient(&args[1..]),
         Some("remove-recipient") => cmd_remove_recipient(&args[1..]),
@@ -121,81 +126,6 @@ fn main() {
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
-
-/// Resolve which profile to use and return `(profile, remaining_args)` with any `--profile
-/// <name>` (or `--profile=<name>`) removed from the args. Precedence: `--profile` flag >
-/// `ENVSTOW_PROFILE` env var > `default`. Returns an error string on a bad/missing name.
-fn resolve_profile(args: &[String]) -> Result<(String, Vec<String>), AppError> {
-    let mut profile: Option<String> = None;
-    let mut rest = Vec::with_capacity(args.len());
-    let mut i = 0;
-    while i < args.len() {
-        let a = &args[i];
-        if a == "--profile" {
-            let Some(name) = args.get(i + 1) else {
-                return Err(AppError::usage("--profile requires a name"));
-            };
-            profile = Some(name.clone());
-            i += 2;
-        } else if let Some(name) = a.strip_prefix("--profile=") {
-            profile = Some(name.to_string());
-            i += 1;
-        } else {
-            rest.push(a.clone());
-            i += 1;
-        }
-    }
-    let profile = profile
-        .or_else(|| env::var("ENVSTOW_PROFILE").ok().filter(|s| !s.is_empty()))
-        .unwrap_or_else(|| layout::DEFAULT_PROFILE.to_string());
-    if !layout::valid_profile_name(&profile) {
-        return Err(AppError::usage(format!(
-            "invalid profile name '{profile}' (use letters, digits, - or _)"
-        )));
-    }
-    Ok((profile, rest))
-}
-
-/// A parsed `[flags] [<NAME>]` command line, shared by `get`/`set`/`delete` — the three commands
-/// with the same shape.
-struct ParsedArgs<'a> {
-    /// Canonical names of the boolean flags that were present.
-    flags: Vec<&'static str>,
-    /// The single positional argument (a secret NAME), if given.
-    positional: Option<&'a str>,
-}
-
-impl ParsedArgs<'_> {
-    fn has(&self, flag: &'static str) -> bool {
-        self.flags.contains(&flag)
-    }
-}
-
-/// Parse `[flags] [<NAME>]`. `known` maps each accepted flag spelling to a canonical name (so
-/// aliases like `-c`/`--clipboard` collapse to one). An unknown `-flag`, or more than one
-/// positional, is a usage error naming the offender.
-fn parse_simple<'a>(
-    args: &'a [String],
-    known: &[(&str, &'static str)],
-) -> Result<ParsedArgs<'a>, AppError> {
-    let mut flags = Vec::new();
-    let mut positional = None;
-    for a in args {
-        let s = a.as_str();
-        if let Some((_, canon)) = known.iter().find(|(spelling, _)| *spelling == s) {
-            if !flags.contains(canon) {
-                flags.push(*canon);
-            }
-        } else if s.starts_with('-') {
-            return Err(AppError::usage(format!("unknown flag '{s}'")));
-        } else if positional.is_some() {
-            return Err(AppError::usage("expected a single NAME"));
-        } else {
-            positional = Some(s);
-        }
-    }
-    Ok(ParsedArgs { flags, positional })
-}
 
 /// Decrypt the located store for `profile` with the user's identity into a [`Secrets`] (whose
 /// values are zeroized on drop).
@@ -275,56 +205,6 @@ fn explain_decrypt_failure(original: String, secret: &str, recipients_path: &Pat
              \x20  …then `git pull` once they've pushed."
         )
     }
-}
-
-/// Environment markers set by AI coding agents that capture command output into their context.
-/// If any is present, `get` masks its value so plaintext can't land in the agent's transcript.
-/// This is a best-effort allowlist across known tools plus a generic opt-in — an agent that
-/// sets none of these is still expected to use `unlock -- <cmd>` (secrets by name), which never
-/// exposes a value regardless of detection.
-const AGENT_ENV_MARKERS: &[&str] = &[
-    // Claude Code
-    "CLAUDECODE",
-    "CLAUDE_CODE_ENTRYPOINT",
-    // Cursor
-    "CURSOR_TRACE_ID",
-    "CURSOR_AGENT",
-    // Aider
-    "AIDER_MODEL",
-    "AIDER_CHAT",
-    // Windsurf
-    "WINDSURF",
-    "WINDSURF_AGENT",
-    // Generic / cross-tool conventions + explicit opt-in
-    "AI_AGENT",
-    "AGENT",
-    "ENVSTOW_AGENT",
-];
-
-/// Are we very likely running under an agent that captures our stdout into its context?
-fn under_agent() -> bool {
-    AGENT_ENV_MARKERS.iter().any(|m| env::var_os(m).is_some())
-}
-
-fn mask(value: &str) -> String {
-    // Fixed-width mask so length isn't leaked either.
-    let _ = value;
-    "••••••••".to_string()
-}
-
-/// A masked preview for confirming a freshly-set value: the first few characters followed by a
-/// fixed run of dots — enough to recognize a paste, without showing the secret or its length.
-/// Short values (≤5 chars) are fully masked so a whole short secret is never revealed.
-fn masked_preview(value: &str) -> String {
-    const SHOWN: usize = 5;
-    const DOTS: &str = "••••••••";
-    // Count by chars (not bytes) so multibyte values aren't split mid-codepoint.
-    let char_count = value.chars().count();
-    if char_count <= SHOWN {
-        return DOTS.to_string();
-    }
-    let head: String = value.chars().take(SHOWN).collect();
-    format!("{head}{DOTS}")
 }
 
 // ---------------------------------------------------------------------------
@@ -939,221 +819,6 @@ fn cmd_refresh(args: &[String]) -> Cmd {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// update
-// ---------------------------------------------------------------------------
-
-/// The published shell installer, i.e. the command the README tells you to run. `upgrade` re-runs
-/// it so you don't have to remember it — that IS the feature.
-///
-/// POSIX-only: Windows installs via the PowerShell installer and takes a different branch in
-/// `cmd_upgrade`, so this would be dead code there (and `-D warnings` in CI rightly fails on it).
-#[cfg(not(windows))]
-const INSTALLER_URL: &str =
-    "https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.sh";
-
-/// `/releases/latest` 302s to `/releases/tag/vX.Y.Z`, so the redirect target names the newest
-/// version. That's the whole version check: no JSON to parse (no serde), no API token, and it
-/// isn't subject to the API's unauthenticated rate limit.
-const LATEST_URL: &str = "https://github.com/jhnhnsn/envstow/releases/latest";
-
-/// Ask GitHub for the latest released version by following the `/releases/latest` redirect and
-/// reading the tag off the final URL. Shells out to `curl` rather than linking an HTTP stack:
-/// envstow is a secrets tool with three dependencies on purpose, and a self-updater is
-/// convenience, not function — not worth tripling the code running beside your decrypted keys.
-/// `curl` is already how the README says to install, so it's a dependency we already require.
-fn latest_version() -> Result<String, String> {
-    let out = Command::new("curl")
-        .args([
-            "-sSL",
-            "--proto",
-            "=https",
-            "--tlsv1.2",
-            "--max-time",
-            "15",
-            "-o",
-            if cfg!(windows) { "NUL" } else { "/dev/null" },
-            "-w",
-            "%{url_effective}",
-            LATEST_URL,
-        ])
-        .output()
-        .map_err(|e| match e.kind() {
-            io::ErrorKind::NotFound => "curl not found — install it, or update manually:\n\
-                 \x20  curl --proto '=https' --tlsv1.2 -LsSf <installer> | sh"
-                .to_string(),
-            _ => format!("could not run curl: {e}"),
-        })?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        return Err(if err.is_empty() {
-            "could not reach GitHub to check for updates".to_string()
-        } else {
-            format!("could not check for updates: {err}")
-        });
-    }
-    let url = String::from_utf8_lossy(&out.stdout);
-    // …/releases/tag/v0.1.11 → 0.1.11
-    let tag = url
-        .rsplit('/')
-        .next()
-        .filter(|t| !t.is_empty() && *t != "latest")
-        .ok_or_else(|| format!("unexpected release URL: {url}"))?;
-    Ok(tag.trim_start_matches('v').to_string())
-}
-
-/// Compare dotted numeric versions (0.1.9 < 0.1.11 — string compare would get this backwards).
-/// Non-numeric or extra components fall back to comparing what parses; unknown shapes sort equal
-/// so we never claim an update exists on a version we can't read.
-fn version_is_newer(candidate: &str, current: &str) -> bool {
-    let parse = |v: &str| -> Vec<u64> {
-        v.split(['.', '-', '+'])
-            .map_while(|p| p.parse::<u64>().ok())
-            .collect()
-    };
-    let (c, u) = (parse(candidate), parse(current));
-    if c.is_empty() || u.is_empty() {
-        return false;
-    }
-    for i in 0..c.len().max(u.len()) {
-        let (a, b) = (
-            c.get(i).copied().unwrap_or(0),
-            u.get(i).copied().unwrap_or(0),
-        );
-        if a != b {
-            return a > b;
-        }
-    }
-    false
-}
-
-/// How this envstow was installed, from the cargo-dist receipt beside the identity config.
-/// `None` means no receipt — a package manager, `cargo install`, or a hand-placed binary.
-fn install_receipt() -> Option<String> {
-    let path = layout::identity_path()
-        .parent()?
-        .join("envstow-receipt.json");
-    let text = std::fs::read_to_string(path).ok()?;
-    // Deliberately not parsing JSON — that would mean a serde dependency for one field. We only
-    // need to know whether OUR installer wrote this, which this substring answers.
-    if text.contains("\"source\": \"cargo-dist\"") || text.contains("\"source\":\"cargo-dist\"") {
-        Some("cargo-dist".to_string())
-    } else {
-        Some("unknown".to_string())
-    }
-}
-
-/// `envstow upgrade [--check]` — check for a newer release, and install it by re-running the
-/// published installer.
-///
-/// Refuses to self-update an install we didn't perform: overwriting a Homebrew/AUR-managed binary
-/// desynchronizes it from the package manager's database (`brew doctor` complains; pacman
-/// considers it hostile), or drops a second envstow on PATH that may shadow the managed one.
-/// When there's no cargo-dist receipt, we say who should do the updating instead.
-fn cmd_upgrade(args: &[String]) -> Cmd {
-    let mut check_only = false;
-    let mut yes = false;
-    for a in args {
-        match a.as_str() {
-            "--check" => check_only = true,
-            "--yes" | "-y" => yes = true,
-            s => {
-                return Err(AppError::usage(format!(
-                    "unknown argument '{s}'\nusage: envstow upgrade [--check] [--yes]"
-                )));
-            }
-        }
-    }
-
-    let current = env!("CARGO_PKG_VERSION");
-    let latest = latest_version()?;
-
-    if !version_is_newer(&latest, current) {
-        eprintln!("✔  envstow {current} is up to date (latest: {latest}).");
-        return Ok(());
-    }
-    eprintln!("⬆️  envstow {latest} is available (you have {current}).");
-    eprintln!("   {}/releases/tag/v{latest}", layout::REPO_URL);
-
-    if check_only {
-        return Ok(());
-    }
-
-    // Only self-update an install we own.
-    if install_receipt().as_deref() != Some("cargo-dist") {
-        return Err(AppError::msg(format!(
-            "this copy wasn't installed by the envstow installer, so `update` won't touch it\n\
-             \x20  (no cargo-dist receipt at {}).\n\
-             \x20  Update it with whatever installed it — e.g. `brew upgrade envstow`, your \
-             distro's\n\
-             \x20  package manager, or `cargo install --path crates/envstow` from a fresh checkout.",
-            layout::identity_path()
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join("envstow-receipt.json")
-                .display()
-        )));
-    }
-
-    // Confirm before replacing the binary. Unlike `init`'s skill prompt, a non-interactive run
-    // does NOT proceed by default: this downloads and executes a remote script over the running
-    // executable, and a CI job that silently swapped its own envstow out from under itself would
-    // be a nasty surprise. Non-TTY callers must opt in with --yes.
-    if !yes {
-        if !io::stdin().is_terminal() {
-            return Err(AppError::msg(
-                "refusing to update non-interactively — pass `--yes` to confirm:\n\
-                 \x20  envstow upgrade --yes",
-            ));
-        }
-        eprint!("Download and install envstow {latest}? [Y/n] ");
-        let _ = io::stderr().flush();
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_ok() {
-            let ans = input.trim().to_ascii_lowercase();
-            if ans == "n" || ans == "no" {
-                eprintln!("   skipped.");
-                return Ok(());
-            }
-        }
-    }
-
-    // Windows installs via the PowerShell installer; there's no `sh` to pipe through, so we print
-    // the command instead of running it.
-    #[cfg(windows)]
-    {
-        eprintln!(
-            "\nenvstow: run the PowerShell installer to upgrade:\n\
-             \x20  powershell -c \"irm https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.ps1 | iex\""
-        );
-        Ok(())
-    }
-
-    #[cfg(not(windows))]
-    {
-        eprintln!("   running the official installer…");
-        // Exactly the pipeline the README documents — same URL, same TLS pinning. We're only
-        // saving you from having to remember it.
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg(format!(
-                "curl --proto '=https' --tlsv1.2 -LsSf {INSTALLER_URL} | sh"
-            ))
-            .status()
-            .map_err(|e| AppError::msg(format!("could not run the installer: {e}")))?;
-        if status.success() {
-            eprintln!("✔  updated to envstow {latest}. Open a new shell (or `hash -r`) to use it.");
-            Ok(())
-        } else {
-            Err(AppError::msg(format!(
-                "the installer exited with {}. Try it by hand:\n\
-                 \x20  curl --proto '=https' --tlsv1.2 -LsSf {INSTALLER_URL} | sh",
-                status.code().unwrap_or(-1)
-            )))
-        }
-    }
-}
-
 /// Spawn either the given command or an interactive subshell, with the secrets in its env.
 /// `secrets` scrubs its values on drop, after the child has its own copy. Returns the exit code.
 fn spawn_with_env(cmd: &[String], secrets: Secrets) -> Cmd {
@@ -1717,32 +1382,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn version_compare_is_numeric_not_lexical() {
-        // The bug this exists to prevent: "0.1.9" > "0.1.11" as strings, so a lexical compare
-        // would tell everyone on 0.1.11 to "update" to 0.1.9, forever.
-        assert!(version_is_newer("0.1.11", "0.1.9"), "0.1.11 > 0.1.9");
-        assert!(!version_is_newer("0.1.9", "0.1.11"), "0.1.9 is not newer");
-
-        assert!(version_is_newer("0.2.0", "0.1.11"));
-        assert!(version_is_newer("1.0.0", "0.99.99"));
-        assert!(!version_is_newer("0.1.11", "0.1.11"), "equal is not newer");
-        assert!(!version_is_newer("0.1.10", "0.1.11"));
-
-        // Differing component counts: missing parts are zero.
-        assert!(version_is_newer("0.2", "0.1.11"));
-        assert!(!version_is_newer("0.1", "0.1.0"), "0.1 == 0.1.0");
-        assert!(version_is_newer("0.1.1", "0.1"));
-
-        // Pre-release / build suffixes: compare the numeric lead, don't panic.
-        assert!(version_is_newer("0.2.0-beta.1", "0.1.11"));
-
-        // Unparseable input must never claim an update — better silent than wrong.
-        assert!(!version_is_newer("garbage", "0.1.11"));
-        assert!(!version_is_newer("0.1.12", "garbage"));
-        assert!(!version_is_newer("", "0.1.11"));
-    }
-
-    #[test]
     fn shell_identifiers_gate_what_can_be_evaled() {
         // These are interpolated into code the user's shell will eval. Anything that could break
         // out of `unset <name>` must be rejected — a store is trusted input, but not THAT trusted.
@@ -1802,40 +1441,6 @@ mod tests {
     }
 
     #[test]
-    fn mask_hides_value_and_length() {
-        assert_eq!(mask("short"), mask("a-much-longer-secret-value"));
-        assert!(!mask("sk-abc123").contains("sk-"));
-    }
-
-    #[test]
-    fn masked_preview_shows_first_five_then_dots() {
-        let p = masked_preview("sk-proj-abc123def456");
-        assert!(p.starts_with("sk-pr"), "should show first 5 chars: {p}");
-        assert!(!p.contains("abc123"), "must not reveal the rest: {p}");
-        assert!(p.contains('•'), "should be masked after the prefix");
-    }
-
-    #[test]
-    fn masked_preview_fully_masks_short_values() {
-        // ≤5 chars: never reveal any of a short secret.
-        for v in ["", "a", "abcd", "exact"] {
-            assert!(
-                !masked_preview(v).chars().any(|c| c != '•'),
-                "short value {v:?} should be all dots, got {}",
-                masked_preview(v)
-            );
-        }
-    }
-
-    #[test]
-    fn masked_preview_counts_chars_not_bytes() {
-        // Multibyte: 5 CHARS shown, no split codepoint (would panic if byte-sliced).
-        let p = masked_preview("café☕secret-tail");
-        assert!(p.starts_with("café☕"), "5 chars incl. multibyte: {p}");
-        assert!(!p.contains("secret"), "rest hidden: {p}");
-    }
-
-    #[test]
     fn render_dotenv_roundtrips_through_parse() {
         let cases = vec![
             ("A".to_string(), "1".to_string()),
@@ -1852,36 +1457,5 @@ mod tests {
             parsed, cases,
             "every value must survive render -> parse unchanged"
         );
-    }
-
-    #[test]
-    fn under_agent_detects_every_known_marker() {
-        // Save every marker we might touch, clear them all, restore at the end. env::set_var is
-        // process-global, so we snapshot the full set to avoid disturbing other tests.
-        let saved: Vec<(String, Option<std::ffi::OsString>)> = AGENT_ENV_MARKERS
-            .iter()
-            .map(|m| (m.to_string(), env::var_os(m)))
-            .collect();
-        for (k, _) in &saved {
-            env::remove_var(k);
-        }
-
-        // With all markers cleared, not under an agent.
-        assert!(!under_agent(), "no markers → not under agent");
-
-        // Each marker independently triggers detection (Claude, Cursor, Aider, Windsurf, opt-in).
-        for marker in AGENT_ENV_MARKERS {
-            env::set_var(marker, "1");
-            assert!(under_agent(), "{marker} should be detected as an agent");
-            env::remove_var(marker);
-        }
-
-        // Restore original environment.
-        for (k, v) in saved {
-            match v {
-                Some(v) => env::set_var(&k, v),
-                None => env::remove_var(&k),
-            }
-        }
     }
 }
