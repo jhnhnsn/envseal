@@ -822,12 +822,54 @@ fn cmd_unlock(args: &[String]) -> i32 {
 
     let names: Vec<&str> = vars.iter().map(|(k, _)| k.as_str()).collect();
     eprintln!(
-        "🔓 envstow: loaded {} secret(s): {}",
+        "🔓 envstow: loaded {} secret(s) from {}: {}",
         names.len(),
+        profile,
         names.join(", ")
     );
+    warn_on_shadowed(&vars);
 
     spawn_with_env(&cmd, vars)
+}
+
+/// Warn about secrets whose names are ALREADY set in our environment with a different value —
+/// the child will see ours, shadowing whatever was there.
+///
+/// This is the nested-unlock case: unlock in FolderA, cd to FolderB, unlock again. The child gets
+/// the UNION of both (env vars are inherited and `Command::env` only adds), with the inner store
+/// winning on any shared name. That layering is usually what you want — a subproject adding its
+/// own vars on top of shared ones — so this warns rather than blocks.
+///
+/// Deliberately vague about the source: all we can see is that the name was already set. It might
+/// be an outer envstow, your shell rc, or CI. Saying "was already set" is the honest limit of
+/// what we know, and it's why identical values are skipped — re-unlocking the same store would
+/// otherwise warn about every name, which is noise, not signal.
+///
+/// Never prints either value, and never reveals which is which — only that they differ.
+fn warn_on_shadowed(vars: &[(String, String)]) {
+    let shadowed: Vec<&str> = vars
+        .iter()
+        .filter(|(k, v)| {
+            // Compare against the inherited value, if any. Only a DIFFERENT value is a real
+            // shadow worth reporting.
+            env::var_os(k).is_some_and(|existing| existing.to_string_lossy() != v.as_str())
+        })
+        .map(|(k, _)| k.as_str())
+        .collect();
+    if shadowed.is_empty() {
+        return;
+    }
+    let (count, verb) = if shadowed.len() == 1 {
+        ("1 name".to_string(), "was")
+    } else {
+        (format!("{} names", shadowed.len()), "were")
+    };
+    eprintln!(
+        "⚠️  envstow: {count} {verb} already set with a different value — this store's value wins \
+         inside:\n\
+         \x20  {}",
+        shadowed.join(", ")
+    );
 }
 
 /// Spawn either the given command or an interactive subshell, with `vars` in its env.

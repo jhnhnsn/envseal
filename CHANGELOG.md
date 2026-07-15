@@ -2,6 +2,26 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.10
+
+### Added
+- **`unlock` warns when it shadows a name that's already set.** Unlocking one store from inside
+  another (e.g. a subproject with its own vars, under a parent with shared ones) gives the child
+  the **union** of both — env vars are inherited, and the inner store wins on any shared name.
+  That layering is usually the point, so this warns rather than blocks:
+  ```
+  🔓 envstow: loaded 2 secret(s) from default: SHARED_KEY, CURA_TOKEN
+  ⚠️  envstow: 1 name was already set with a different value — this store's value wins inside:
+     SHARED_KEY
+  ```
+  Only names whose value actually **differs** are listed — re-unlocking the same store is silent.
+  Neither value is ever printed, and envstow can't tell what set the outer one (an outer unlock,
+  your shell rc, CI), so the warning says only that the name was already set.
+
+### Changed
+- `unlock` now names the profile it loaded from (`loaded 2 secret(s) from prod: …`), which
+  matters once more than one store is in play.
+
 ## 0.1.9
 
 ### Changed (breaking — everyone sharing a store must update to ≥ 0.1.9)

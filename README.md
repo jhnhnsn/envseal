@@ -316,6 +316,34 @@ For those: rotate, and treat this as strong hygiene, not a vault.
 
 ---
 
+## Nested unlocks (a store inside a store)
+
+envstow's unit is the **folder** — `.envstow/` anchors a store, and nothing stops a subfolder from
+having its own. Unlocking one from inside another is supported and often what you want: a
+subproject gets its own vars layered on top of the shared ones above it.
+
+The child sees the **union** of both. Env vars are inherited, and envstow only ever *adds*, so:
+
+- names only in the outer store stay set,
+- names only in the inner store are added,
+- **names in both take the inner store's value** — the one you unlocked last wins.
+
+Because a silently-inherited credential is worse than a missing one, `unlock` names any collision:
+
+```
+🔓 envstow: loaded 2 secret(s) from default: SHARED_KEY, CURA_TOKEN
+⚠️  envstow: 1 name was already set with a different value — this store's value wins inside:
+   SHARED_KEY
+```
+
+Only names whose value actually differs are listed. Two caveats worth knowing: envstow can't tell
+*what* set the outer value (an outer unlock, your `.zshrc`, CI — it only sees that the name was
+taken), and it never prints either value, so the warning tells you a collision happened, not which
+value is which. Exiting the inner shell drops the inner store's vars; the outer shell's
+environment was never modified.
+
+---
+
 ## Store format & version mismatches
 
 Each store begins with a plaintext `envstow-format: N` line before the age payload. It versions

@@ -531,6 +531,82 @@ fn set_clipboard_errors_when_no_tool_is_available() {
 }
 
 #[test]
+fn unlock_warns_when_it_shadows_a_different_value() {
+    let repo = Repo::new("shadow");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "DATABASE_URL"], "inner-value").code, 0);
+    assert_eq!(repo.run(&["set", "ONLY_HERE"], "uncontested").code, 0);
+
+    // Simulate an outer unlock (or a shell rc) having already set the same name differently.
+    let out = repo.run_env(&["unlock", "--", "true"], "", "DATABASE_URL", "outer-value");
+    assert_eq!(out.code, 0, "unlock should still succeed: {}", out.stderr);
+    assert!(
+        out.stderr.contains("already set with a different value"),
+        "should warn about the shadow: {}",
+        out.stderr
+    );
+    assert!(
+        out.stderr.contains("DATABASE_URL"),
+        "should name the shadowed var: {}",
+        out.stderr
+    );
+    // Only the contested name is listed in the warning — the tail after "wins inside:" is the
+    // shadowed list, and an uncontested name must not appear there.
+    let shadowed_list = out
+        .stderr
+        .split("wins inside:")
+        .nth(1)
+        .expect("warning should have a shadowed list");
+    assert!(
+        !shadowed_list.contains("ONLY_HERE"),
+        "must not list an uncontested name as shadowed: {shadowed_list}"
+    );
+    // Neither value may be printed — not the outer one, not ours.
+    assert!(
+        !out.stderr.contains("inner-value") && !out.stderr.contains("outer-value"),
+        "must never print either value: {}",
+        out.stderr
+    );
+
+    // Warning only: the store's value still wins inside the child.
+    let check = repo.run_env(
+        &[
+            "unlock",
+            "--",
+            "sh",
+            "-c",
+            "test \"$DATABASE_URL\" = inner-value && echo OK",
+        ],
+        "",
+        "DATABASE_URL",
+        "outer-value",
+    );
+    assert!(
+        check.stdout.contains("OK"),
+        "the store's value must shadow the outer one: {} {}",
+        check.stdout,
+        check.stderr
+    );
+}
+
+#[test]
+fn unlock_is_quiet_when_the_value_is_unchanged() {
+    // Re-unlocking the same store (or any name that happens to already hold the same value) is
+    // not a shadow — warning there would fire on every name and train people to ignore it.
+    let repo = Repo::new("noshadow");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "TOKEN"], "samevalue").code, 0);
+
+    let out = repo.run_env(&["unlock", "--", "true"], "", "TOKEN", "samevalue");
+    assert_eq!(out.code, 0);
+    assert!(
+        !out.stderr.contains("already set"),
+        "an identical value is not a shadow: {}",
+        out.stderr
+    );
+}
+
+#[test]
 fn store_carries_a_format_header() {
     let repo = Repo::new("fmthdr");
     assert_eq!(repo.run(&["init"], "").code, 0);
