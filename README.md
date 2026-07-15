@@ -179,6 +179,20 @@ SHA-256 and enforces TLS. To inspect the script first, or verify checksums by ha
 install options in [ONBOARDING.md](./ONBOARDING.md#1-install-envstow-once-per-machine). Or build
 from source (needs [Rust](https://rustup.rs)): `cargo install --path crates/envstow`.
 
+**Prefer no installer?** Grab the binary directly from the
+[latest release](https://github.com/jhnhnsn/envstow/releases/latest) — download the archive for
+your platform (e.g. `envstow-aarch64-apple-darwin.tar.xz`, or the `x86_64-…` / `…-linux-gnu` /
+`…-windows-msvc.zip` variant), extract it, and move `envstow` onto your `PATH`:
+
+```bash
+tar xf envstow-aarch64-apple-darwin.tar.xz            # → envstow-aarch64-apple-darwin/
+mv envstow-aarch64-apple-darwin/envstow ~/.local/bin/ # any dir on your PATH
+```
+
+Each archive ships with a `.sha256` you can check first (`shasum -a 256 -c envstow-*.tar.xz.sha256`).
+It's the same binary the installer places — this just skips the script. `envstow upgrade` won't
+manage a hand-placed binary (no install receipt); re-download to update, or use the installer.
+
 **Joining a team that already uses envstow?** See **[ONBOARDING.md](./ONBOARDING.md)** — install,
 share your key, get added. A ready-made **AI-agent skill** ([`agent/envstow-skill.md`](./agent/envstow-skill.md))
 teaches Claude Code to use secrets by name — install it globally or per-repo (see
