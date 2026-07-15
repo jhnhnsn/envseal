@@ -2,6 +2,17 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.7
+
+### Added
+- **`envstow delete <NAME>`.** Remove one secret from the store and re-encrypt, without opening
+  `$EDITOR`. Confirms `[y/N]` on a terminal; `--force` skips the prompt, and a non-interactive
+  stdin (CI) proceeds without asking. Respects `--profile`, so deleting a name from `prod`
+  leaves the same name in `default` untouched. The value is never printed and is zeroized.
+  Deleting only removes a secret going **forward** — the value stays readable in the store's git
+  history to anyone who is (or was) a recipient, so the command prints the same rotate-at-the-
+  source reminder `remove-recipient` does.
+
 ## 0.1.6
 
 ### Changed (breaking — re-run `envstow init`)

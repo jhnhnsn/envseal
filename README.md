@@ -87,6 +87,7 @@ envstow set MY_SUPER_SECRET_KEY                             # …or run bare, th
 printf 'sk-proj-abc123' | envstow set MY_SUPER_SECRET_KEY   # …or pipe a literal
 envstow edit                                           # …or edit them all in $EDITOR
 envstow list                                           # names only, never values
+envstow delete MY_SUPER_SECRET_KEY                     # remove one (then rotate it at the source)
 ```
 
 `set` confirms with a **masked preview** — the first 5 characters then dots (or all dots for
@@ -226,6 +227,7 @@ env var > `default`. Using a profile that doesn't exist errors and tells you to
 |---|---|
 | `envstow init` | Generate identity, create `recipients` + empty store. Idempotent. |
 | `envstow set <NAME>` | Store a value read from **stdin** (keeps it off the command line). |
+| `envstow delete <NAME> [--force]` | Remove one secret; re-encrypt (then **rotate**). Confirms on a TTY. |
 | `envstow edit` | Decrypt all secrets into `$EDITOR`, re-encrypt on save (temp file shredded). |
 | `envstow get <NAME> [--show]` | Resolve one secret by name. **Masked under an agent** unless `--show`. |
 | `envstow list` | List secret **names** (never values). |

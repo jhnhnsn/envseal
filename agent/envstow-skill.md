@@ -66,6 +66,18 @@ envstow set TLS_KEY < key.pem                     # multi-line value (PEM, cert,
 
 After changing secrets, remind the human to `git add .envstow && git commit`.
 
+## Removing a secret
+
+```bash
+envstow delete SOME_TOKEN          # prompts [y/N] on a terminal; --force skips the prompt
+```
+
+This is safe to run — it never prints the value. Deleting only removes the secret going
+**forward**: the value stays readable in the store's git history to anyone who is (or was) a
+recipient. If it's being deleted because it leaked or should stop working, tell the human to
+rotate it at its source too. Deletion is per-profile — a name in `dev` and `prod` needs a
+`delete` for each (`--profile <name>`).
+
 ## Common failures and what they mean
 
 - **`no 'recipients' file found ... (run envstow init first)`** — you are not inside an

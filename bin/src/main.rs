@@ -4,6 +4,7 @@
 //!
 //! Commands:
 //!   envstow get <NAME> [--show]     Resolve one secret by name (masked under an agent).
+//!   envstow delete <NAME>           Remove one secret and re-encrypt (then rotate!).
 //!   envstow unlock [-- <cmd>...]    Spawn a subshell / run a command with the whole env set.
 //!   envstow init                    Generate an identity, add self as recipient, create store.
 //!   envstow pubkey                  Print your age public key (share it to be added).
@@ -64,6 +65,7 @@ fn main() {
         }
         Some("get") => cmd_get(&args[1..]),
         Some("set") => cmd_set(&args[1..]),
+        Some("delete") => cmd_delete(&args[1..]),
         Some("edit") => cmd_edit(&args[1..]),
         Some("list") => cmd_list(&args[1..]),
         Some("pubkey") => cmd_pubkey(),
@@ -370,6 +372,101 @@ fn cmd_set(args: &[String]) -> i32 {
     let code = write_secrets(&paths.recipients, &paths.store, &mut vars);
     if code == 0 {
         eprintln!("✔  set {name} ({preview})");
+    }
+    code
+}
+
+/// `envstow delete <NAME>` — remove one secret from the store and re-encrypt.
+///
+/// Deleting a name only removes it going FORWARD. The value stays readable in every historical
+/// commit of the store to anyone who is (or was) a recipient, so a deleted secret is not a
+/// revoked one — hence the rotate reminder, mirroring `remove-recipient`.
+fn cmd_delete(args: &[String]) -> i32 {
+    let (profile, args) = match resolve_profile(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow delete: {e}");
+            return 2;
+        }
+    };
+    let mut force = false;
+    let mut name: Option<&str> = None;
+    for a in &args {
+        match a.as_str() {
+            "--force" | "-f" => force = true,
+            s if s.starts_with('-') => {
+                eprintln!("envstow delete: unknown flag '{s}'");
+                return 2;
+            }
+            s => {
+                if name.is_some() {
+                    eprintln!("envstow delete: expected a single NAME");
+                    return 2;
+                }
+                name = Some(s);
+            }
+        }
+    }
+    let Some(name) = name else {
+        eprintln!("envstow delete: usage: envstow delete <NAME> [--profile P] [--force]");
+        return 2;
+    };
+
+    let paths = match layout::locate(&profile) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("envstow: {e}");
+            return 1;
+        }
+    };
+    let mut vars = match load_secrets(&profile) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("envstow: {e}");
+            return 1;
+        }
+    };
+
+    if !vars.iter().any(|(k, _)| k == name) {
+        for (_, v) in vars.iter_mut() {
+            v.zeroize();
+        }
+        eprintln!("envstow: no secret named '{name}'");
+        return 1;
+    }
+
+    // Confirm on a TTY: deleting is destructive and the value is unrecoverable from the store
+    // once re-encrypted (only git history keeps it). Non-interactive callers are unblocked by
+    // --force, and a piped stdin (CI) proceeds without prompting, matching `init`'s convention.
+    if !force && io::stdin().is_terminal() {
+        eprint!("Delete '{name}' from profile '{profile}'? [y/N] ");
+        let _ = io::stderr().flush();
+        let mut input = String::new();
+        let confirmed = io::stdin().read_line(&mut input).is_ok()
+            && matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes");
+        if !confirmed {
+            for (_, v) in vars.iter_mut() {
+                v.zeroize();
+            }
+            eprintln!("   aborted — store left unchanged.");
+            return 1;
+        }
+    }
+
+    // Drop the entry, scrubbing its value rather than just letting the Vec free it.
+    if let Some(i) = vars.iter().position(|(k, _)| k == name) {
+        let (_, mut value) = vars.remove(i);
+        value.zeroize();
+    }
+
+    let code = write_secrets(&paths.recipients, &paths.store, &mut vars);
+    if code == 0 {
+        eprintln!("✔  deleted {name}");
+        eprintln!(
+            "\n⚠️  Deleting only removes it going forward. The value is still readable in this\n\
+             \x20   store's git history by anyone who is (or was) a recipient. Rotate it at the\n\
+             \x20   source if it should no longer be valid."
+        );
     }
     code
 }
@@ -1229,6 +1326,7 @@ fn print_help() {
          USAGE:\n\
          \x20 envstow get <NAME> [--show]      Resolve one secret (masked under an agent).\n\
          \x20 envstow set <NAME>               Read a value from stdin and store it.\n\
+         \x20 envstow delete <NAME>            Remove one secret and re-encrypt (then rotate).\n\
          \x20 envstow edit                     Edit all secrets in $EDITOR (decrypt/re-encrypt).\n\
          \x20 envstow list                     List secret NAMES (never values).\n\
          \x20 envstow pubkey                   Print your age PUBLIC key (share it to be added).\n\

@@ -437,6 +437,79 @@ fn get_masks_under_agent_but_reveals_with_show() {
 }
 
 #[test]
+fn delete_removes_only_the_named_secret() {
+    let repo = Repo::new("delete");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "DOOMED"], "deleteme").code, 0);
+    assert_eq!(repo.run(&["set", "KEEPER"], "keepme").code, 0);
+
+    let out = repo.run(&["delete", "DOOMED"], "");
+    assert_eq!(out.code, 0, "delete failed: {}", out.stderr);
+    assert!(
+        out.stderr.to_lowercase().contains("rotate"),
+        "should warn about rotation: {}",
+        out.stderr
+    );
+
+    // The name is gone from list, the neighbour survives.
+    let list = repo.run(&["list"], "");
+    assert!(!list.stdout.contains("DOOMED"), "deleted name still listed");
+    assert!(list.stdout.contains("KEEPER"), "neighbour must survive");
+
+    // The store still decrypts and the survivor round-trips unchanged.
+    let check = repo.run(
+        &[
+            "unlock",
+            "--",
+            "sh",
+            "-c",
+            "test \"$KEEPER\" = keepme && test -z \"$DOOMED\" && echo OK",
+        ],
+        "",
+    );
+    assert!(
+        check.stdout.contains("OK"),
+        "post-delete store wrong: {} {}",
+        check.stdout,
+        check.stderr
+    );
+
+    // The deleted value is no longer in the re-encrypted store.
+    store_is_encrypted(&repo.store(), "deleteme");
+
+    // get on the deleted name fails; deleting an unknown name fails.
+    assert_eq!(repo.run(&["get", "DOOMED"], "").code, 1);
+    assert_eq!(repo.run(&["delete", "NOPE"], "").code, 1);
+}
+
+#[test]
+fn delete_is_scoped_to_one_profile() {
+    let repo = Repo::new("delprofile");
+    assert_eq!(repo.run(&["init", "--no-skill"], "").code, 0);
+    assert_eq!(repo.run(&["set", "SHARED"], "default-val").code, 0);
+    assert_eq!(repo.run(&["profile", "create", "prod"], "").code, 0);
+    assert_eq!(
+        repo.run(&["--profile", "prod", "set", "SHARED"], "prod-val")
+            .code,
+        0
+    );
+
+    // Deleting from prod must leave the same name in default untouched.
+    assert_eq!(
+        repo.run(&["--profile", "prod", "delete", "SHARED"], "")
+            .code,
+        0
+    );
+    assert!(!repo
+        .run(&["--profile", "prod", "list"], "")
+        .stdout
+        .contains("SHARED"));
+
+    let d = repo.run(&["unlock", "--", "sh", "-c", "printf '%s' \"$SHARED\""], "");
+    assert_eq!(d.stdout, "default-val", "default profile must be untouched");
+}
+
+#[test]
 fn edit_updates_the_store() {
     let repo = Repo::new("edit");
     assert_eq!(repo.run(&["init"], "").code, 0);
