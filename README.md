@@ -474,6 +474,9 @@ cargo clippy --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 
 No MSVC toolchain is needed — `clippy`/`check` don't link, so this works from macOS or Linux.
 
+If you touch `scripts/*.sh`, also run **`shellcheck scripts/*.sh`** — CI fails on any warning, and
+it catches shell issues a local run won't (`brew install shellcheck` / `apt install shellcheck`).
+
 CI (`.github/workflows/ci.yml`) builds + tests + `fmt` + `clippy` on macOS/Linux/Windows, and
 runs `shellcheck` + the redact-guard test on Linux.
 

@@ -28,6 +28,9 @@ payload="$(cat)"
 # Parse the payload, enumerate secret values from the environment, and check for
 # leaks — all in one Python pass. Secrets are read from os.environ (never argv),
 # and the value itself is never printed; only the offending NAME is named.
+# The Python body is single-quoted on purpose — `$name` etc. are Python, not
+# shell, so they must NOT be expanded by bash.
+# shellcheck disable=SC2016
 printf '%s' "$payload" | python3 -c '
 import sys, os, json, base64, re
 
