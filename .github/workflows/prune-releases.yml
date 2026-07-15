@@ -6,10 +6,16 @@ name: prune-releases
 #
 # This is a separate workflow (not part of the cargo-dist-generated release.yml) so it survives
 # `dist generate` without causing config drift.
+#
+# Triggered on completion of the "Release" workflow rather than on `release: published` — the
+# latter is SUPPRESSED by GitHub when the release is created by a GITHUB_TOKEN action (cargo-dist),
+# to prevent workflow-triggering-workflow recursion. `workflow_run` fires reliably after Release.
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch: {}   # allow manual runs too
 
 permissions:
   contents: write   # needed to delete releases
@@ -17,6 +23,8 @@ permissions:
 jobs:
   prune:
     runs-on: ubuntu-latest
+    # Only prune after a SUCCESSFUL release build (skip if Release failed).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Delete all but the latest release (keep tags)
         env:
