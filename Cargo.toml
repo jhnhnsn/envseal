@@ -1,8 +1,8 @@
-# Workspace root. The envstow binary crate lives in `bin/`; this manifest exists so tooling
+# Workspace root. The envstow crate lives in `crates/envstow/`; this manifest exists so tooling
 # (cargo-dist / the release pipeline) operates from the repo root, and so future crates can be
 # added as workspace members without restructuring.
 [workspace]
-members = ["bin"]
+members = ["crates/envstow"]
 resolver = "2"
 
 # The profile that 'dist' will build with

@@ -23,9 +23,9 @@ keys.txt
 .envstow-edit.tmp
 
 # Rust build output. With the workspace root Cargo.toml, output lands in ./target;
-# bin/target is kept ignored too in case the crate is built in isolation.
+# the crate's own target is kept ignored too in case it's built in isolation.
 /target/
-bin/target/
+crates/envstow/target/
 
 # OS / editor cruft
 .DS_Store

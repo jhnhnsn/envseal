@@ -126,7 +126,7 @@ Installs to `~/.local/bin` — **open a new terminal** (or `source ~/.local/bin/
 running `envstow`, then `envstow --version` to confirm. The installer verifies the binary's
 SHA-256 and enforces TLS. To inspect the script first, or verify checksums by hand, see the
 install options in [ONBOARDING.md](./ONBOARDING.md#1-install-envstow-once-per-machine). Or build
-from source (needs [Rust](https://rustup.rs)): `cargo install --path bin`.
+from source (needs [Rust](https://rustup.rs)): `cargo install --path crates/envstow`.
 
 **Joining a team that already uses envstow?** See **[ONBOARDING.md](./ONBOARDING.md)** — install,
 share your key, get added. A ready-made **AI-agent skill** ([`agent/envstow-skill.md`](./agent/envstow-skill.md))
@@ -527,7 +527,7 @@ versions are read fine and are upgraded in place the first time anything writes 
 ## Developing on envstow
 
 ```bash
-cd bin && cargo test         # unit + integration: crypto round-trip, masking, full CLI lifecycle
+cd crates/envstow && cargo test         # unit + integration: crypto round-trip, masking, full CLI lifecycle
 scripts/test-redact-guard.sh # proves the hook blocks a leak and allows name references
 ```
 

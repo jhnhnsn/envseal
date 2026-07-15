@@ -76,7 +76,7 @@ git clone https://github.com/jhnhnsn/envstow.git
 cd envstow
 
 # Option A — install onto your PATH via cargo (→ ~/.cargo/bin/envstow):
-cargo install --path bin
+cargo install --path crates/envstow
 
 # Option B — build, then copy the binary wherever you want:
 cargo build --release

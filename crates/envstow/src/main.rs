@@ -1521,7 +1521,7 @@ fn cmd_init(args: &[String]) -> i32 {
 
 /// The agent skill content, embedded at compile time so the binary can write it into any repo
 /// (a consuming repo has no copy of the source file). Kept in sync with `agent/envstow-skill.md`.
-const AGENT_SKILL: &str = include_str!("../../agent/envstow-skill.md");
+const AGENT_SKILL: &str = include_str!("../../../agent/envstow-skill.md");
 
 /// Offer to write the Claude Code agent skill into `<repo>/.claude/skills/envstow/SKILL.md`.
 /// Prompts `[Y/n]` on a TTY (default yes); on a non-TTY (CI) it installs without prompting.
