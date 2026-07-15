@@ -34,8 +34,10 @@ install or invoke.
 - `envstow delete <NAME>` — remove one secret and re-encrypt (`--force` to skip the prompt).
 - `envstow edit` — open all secrets in `$EDITOR` (decrypt → edit → re-encrypt).
 - `envstow list` — list secret **names** (never values).
-- `eval "$(envstow refresh)"` — inside an unlocked shell, unset secrets that have since left the
-  store. Only ever emits `unset` lines, never values, so it's safe to run under an agent.
+- After any store change (`set`/`delete`/`edit`) made **inside** an unlocked shell, the running
+  shell still holds the old values — `exit` and `envstow unlock` again to pick up the change.
+  (`eval "$(envstow refresh)"` can unset deleted names in place, but `exit` + `unlock` is the
+  uniform rule.)
 - `envstow add-recipient <age1...>` / `remove-recipient <key|label>` — manage collaborators.
 - `envstow upgrade [--check]` — upgrade envstow itself. Safe to run `--check`; the human should run
   the actual upgrade (it needs `--yes` non-interactively and replaces the binary).

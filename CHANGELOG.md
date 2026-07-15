@@ -2,6 +2,18 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.17
+
+### Changed
+- **Simplified the stale-shell guidance to one consistent rule.** After any change to the store
+  made *inside* an unlocked shell (`set`, `delete`, or `edit`), the fix is now uniformly
+  **`exit` then `envstow unlock`** — for added, changed, and deleted secrets alike. Docs
+  previously split it (`refresh` for deletions, `exit` + unlock for changes), which was more to
+  remember for little gain. `envstow refresh` still exists and still unsets deleted names in place
+  for anyone who wants it, but it's no longer the recommended path. Updated the README, the
+  embedded agent skill (re-run `envstow init` to refresh it), and CLAUDE.md. No behavior change —
+  the `refresh` command is unchanged.
+
 ## 0.1.16
 
 ### Changed

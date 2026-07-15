@@ -385,7 +385,7 @@ env var > `default`. Using a profile that doesn't exist errors and tells you to
 | `envstow list` | List secret **names** (never values). |
 | `envstow pubkey` | Print your age **public** key, to share so a member can add you. |
 | `envstow unlock [-- <cmd>]` | Run a command (or subshell) with every secret set as an env var. |
-| `eval "$(envstow refresh)"` | Unset secrets this shell still holds that have left the store. Only emits `unset` — see [Stale secrets](#stale-secrets-in-an-unlocked-shell). |
+| `eval "$(envstow refresh)"` | Optional: unset *deleted* names an unlocked shell still holds, without restarting it (emits only `unset`). For any store change, `exit` + `envstow unlock` is the simple rule — see [Stale secrets](#stale-secrets-in-an-unlocked-shell). |
 | `envstow add-recipient <age1…> [label]` | Add a collaborator **and** re-encrypt — both steps. |
 | `envstow remove-recipient <key\|label>` | Remove a collaborator; re-encrypt (then **rotate**). |
 | `envstow reencrypt` | Re-encrypt to the current `recipients` — after someone's key was added by hand or by their `init`. |
@@ -477,42 +477,28 @@ group or other — a loose key decrypts every store you can. Fix with `chmod 600
 
 ## Stale secrets in an unlocked shell
 
-Your unlocked shell got its environment **at spawn time, as a copy**. Delete or change a secret
-afterwards and the shell keeps the old value — no process can reach into a running one and change
-its environment. That's an OS boundary, not an envstow limitation.
+An `envstow unlock` shell got its environment **at spawn time, as a copy**. If you change the
+store afterwards — `set`, `delete`, or `edit` — the running shell keeps the *old* values. No
+process can reach into a running one and change its environment; that's an OS boundary, not an
+envstow limitation.
 
-For a **deleted** secret, `refresh` clears it in place:
-
-```bash
-eval "$(envstow refresh)"
-#   → 🔄 envstow: unset 1 secret(s) no longer in the store: OLD_TOKEN
-```
-
-The `eval` is what makes it work: envstow prints shell code and **your shell** runs it, which is
-the only way to alter the shell you're standing in. (Same trick as `ssh-agent` and `direnv`.)
-
-It is deliberately **one-directional — it only ever emits `unset`:**
-
-| Change | `refresh` | Why |
-|---|---|---|
-| Secret **deleted** | ✅ unset in place | Unsetting a name reveals nothing |
-| Secret **changed** or **added** | ❌ reported, not applied | Would mean printing the value to stdout |
-
-Updating a value would require `export NAME=<value>` on stdout — dumping plaintext, the one thing
-envstow exists to prevent (and catastrophic under an agent, which captures stdout). So for changed
-or added secrets, `refresh` tells you and you re-unlock:
+So after any change to the store while unlocked, refresh your shell by restarting it:
 
 ```bash
-exit && envstow unlock
+exit            # leave the unlocked shell (drops its stale environment)
+envstow unlock  # start a fresh one — reads the store as it is now
 ```
 
-`refresh` only unsets names **envstow itself set** (tracked in `ENVSTOW_LOADED`), so a same-named
-variable from your shell rc is never touched. Note that neither `envstow unlock` again nor
-`exec envstow unlock` fixes a stale delete — both **inherit** the current environment, and
-inheriting can add or overwrite but never unset. `exit` is what actually drops it.
+This is the one consistent answer for every kind of change (added, changed, or deleted secret),
+and it keeps you in control: you decide when to drop the shell rather than having a command
+restart it — or worse, print a value — on your behalf.
 
-It emits POSIX `unset` syntax (bash/zsh/sh/fish), so on **PowerShell** use `exit` +
-`envstow unlock` instead.
+> Why not "patch the current shell in place"? The only way to alter a running shell's environment
+> is to print shell code it evaluates — and updating a value would mean printing that value to
+> stdout, the one thing envstow exists to prevent (and catastrophic under an agent, which captures
+> stdout). `exit` + `unlock` sidesteps that entirely: the fresh child reads the store directly, no
+> value ever printed. (`envstow refresh` can emit `unset` lines for *deleted* names if you'd rather
+> not restart, but `exit` + `unlock` is the simple, uniform rule.)
 
 ---
 
