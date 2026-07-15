@@ -11,12 +11,6 @@ All notable changes to envstow are documented here. Versions follow [SemVer](htt
   the new binary does **not** read the old `ENVSEAL_*` variables. Re-run `envstow init` to set
   up (a fresh identity/store under the new name).
 
-### Added
-- **Terminal-title indicator.** An `envstow unlock` subshell sets the terminal window/tab title
-  to `[envstow:unlocked]` so it's obvious the window holds unlocked secrets; the title clears on
-  `exit`. Plain ASCII (no emoji) for terminal compatibility; best-effort (some prompt frameworks
-  re-set the title per command).
-
 ## 0.1.4
 
 ### Added

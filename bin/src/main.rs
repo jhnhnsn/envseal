@@ -547,10 +547,6 @@ fn spawn_with_env(cmd: &[String], mut vars: Vec<(String, String)>) -> i32 {
     let (program, args, interactive) = if cmd.is_empty() {
         let (sh, sh_args) = default_shell();
         eprintln!("🔓 envstow: launching unlocked subshell. Type `exit` to lock.");
-        // Mark the terminal title so it's obvious this window holds unlocked secrets. Plain
-        // ASCII (no emoji) for terminal compatibility; OSC 0 sets both icon + window title.
-        // Best-effort: some prompt frameworks re-set the title per command and may override it.
-        set_terminal_title("[envstow:unlocked]");
         (sh, sh_args, true)
     } else {
         (
@@ -595,22 +591,7 @@ fn spawn_with_env(cmd: &[String], mut vars: Vec<(String, String)>) -> i32 {
         }
     };
 
-    // Clear the "[envstow:unlocked]" title we set for the subshell, on the way out.
-    if interactive {
-        set_terminal_title("");
-    }
     code
-}
-
-/// Set the terminal window/icon title via OSC escape sequence (works across terminals and is
-/// independent of the prompt framework). Only emits when stderr is a real terminal, so it never
-/// corrupts piped output. Passing an empty string clears the title.
-fn set_terminal_title(title: &str) {
-    if io::stderr().is_terminal() {
-        // OSC 0 ; <title> BEL — sets both icon name and window title.
-        eprint!("\x1b]0;{title}\x07");
-        let _ = io::stderr().flush();
-    }
 }
 
 #[cfg(unix)]
