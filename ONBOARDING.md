@@ -89,34 +89,22 @@ pick the exact location.
 
 ## 2. Create your key and share it
 
-> **envstow works per project directory.** Every command operates on the secret store of the
-> repo you're currently *inside* — it looks for a `.envstow/` dir in the current directory and
-> walks up to find the project root. So always `cd` into the project first. One machine, one
-> personal key (in `~/.config/envstow/`), but each repo has its own `recipients` + encrypted
-> store. Running a command outside any envstow repo gives you "no `.envstow/` found."
-
-From inside the project:
+Your key is **per machine**, not per project — so make it **outside the project**:
 
 ```bash
-cd ~/path/to/the-project        # ← be in the repo; envstow acts on THIS repo's store
-envstow init                    # generates your private key (once) + your recipients entry here
-                                #   also offers [Y/n] to add the Claude Code agent skill to the repo
-envstow pubkey                  # prints your PUBLIC key (age1...) — safe to share
+cd ~                # anywhere but the project
+envstow init        # generates your private key (once per machine)
+envstow pubkey      # prints your PUBLIC key (age1...) — safe to share
 ```
 
-`init` offers to drop the agent skill into `.claude/skills/envstow/` — say yes, then commit it,
-and every teammate who clones gets it (their agent learns to use secrets safely). `--no-skill`
-skips. For the full guardrails (denylist + output-guard hook), see
-[GUARDRAILS.md](./GUARDRAILS.md).
+Send that `age1...` key to a current member (Slack or email is fine — it's public).
+Your **private** key stays in `~/.config/envstow/` and is never shared or committed.
 
-Send that `age1...` public key to a current member (Slack, email, or — best — open a PR that
-adds it to the `recipients` file). Your **private** key stays in `~/.config/envstow/` and is
-never shared or committed.
-
-> ⚠️ **`recipients` is an input to encryption, not an access list.** Running `envstow init` adds
-> your key to that file, but you **cannot decrypt the store yet** — the ciphertext is only re-keyed
-> when an existing member re-encrypts it (step 3). Until then `envstow list`/`unlock` will tell you
-> exactly who needs to run what.
+> **Why outside the project?** `recipients` is an **input to encryption, not an access list.**
+> Running `init` *inside* the project appends your key to that file — which grants you nothing,
+> since the store is still encrypted only to the existing members. You'd then need someone to run
+> `envstow reencrypt` instead of the simpler `add-recipient`. Init elsewhere and skip the detour.
+> (If you already did it, no harm: envstow will tell you exactly who needs to run what.)
 
 ## 3. A current member adds you
 
@@ -130,10 +118,18 @@ git add .envstow && git commit -m "Add your-name" && git push
 Then you `git pull`, and you're in:
 
 ```bash
+cd ~/path/to/the-project        # every command acts on the store of the folder you're in
 envstow list                    # you can now see the stored secret names
 ```
 
+`add-recipient` adds your key **and** re-encrypts the store — that second half is what actually
+grants access.
+
 ## Daily use
+
+**Every command acts on the folder you're in.** envstow looks for `.envstow/` in the current
+directory and walks up to find it, so `cd` into the project first. Outside one, you'll get
+"no `.envstow/` found". One personal key per machine; each project has its own store.
 
 You never need the plaintext. Run commands that need secrets through envstow — it sets them as
 env vars for that one command:
@@ -153,9 +149,14 @@ See the [README](./README.md) for the full command list.
 
 ## Hardening your repo for AI agents
 
-`envstow init` already offers to add the **agent skill** (Layer 1 — instructions). For the full
-defense — a **command denylist** and an **output-guard hook** that mechanically blocks a leaked
-value — follow **[GUARDRAILS.md](./GUARDRAILS.md)**, which covers Claude Code, Cursor, and others.
+Run `envstow init` **inside the project** to add the **agent skill** (Layer 1 — instructions) at
+`.claude/skills/envstow/`. It prompts `[Y/n]`; commit the result and every teammate who clones
+gets it, so their agent learns to use secrets by name. This is safe to run once you're already a
+recipient — it's idempotent and won't disturb the store.
+
+For the full defense — a **command denylist** and an **output-guard hook** that mechanically
+blocks a leaked value — follow **[GUARDRAILS.md](./GUARDRAILS.md)**, which covers Claude Code,
+Cursor, and others.
 
 Tip: you can point your agent at that file's URL —
 `https://github.com/jhnhnsn/envstow/blob/main/GUARDRAILS.md` — and ask it to apply the
