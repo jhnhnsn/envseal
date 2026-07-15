@@ -78,10 +78,11 @@ Copy a secret from your password manager, then paste it into `set` — the value
 **stdin**, so it never lands on the command line or in your shell history:
 
 ```bash
-pbpaste | envstow set MY_SUPER_SECRET_KEY                   # macOS: paste from clipboard
-# Linux (wayland): wl-paste | envstow set MY_SUPER_SECRET_KEY
-# Linux (X11):     xclip -o  | envstow set MY_SUPER_SECRET_KEY
+envstow set MY_SUPER_SECRET_KEY --clipboard                 # read the OS clipboard directly
 #   → ✔  set MY_SUPER_SECRET_KEY (sk-pr••••••••)   ← masked confirmation of what you stored
+# Uses your platform's paste tool: pbpaste (macOS), wl-paste/xclip/xsel (Linux),
+# Get-Clipboard (Windows). Piping still works if you prefer:
+pbpaste | envstow set MY_SUPER_SECRET_KEY                   # macOS: paste from clipboard
 
 envstow set MY_SUPER_SECRET_KEY                             # …or run bare, then paste + Enter
 printf 'sk-proj-abc123' | envstow set MY_SUPER_SECRET_KEY   # …or pipe a literal
@@ -226,7 +227,7 @@ env var > `default`. Using a profile that doesn't exist errors and tells you to
 | Command | Purpose |
 |---|---|
 | `envstow init` | Generate identity, create `recipients` + empty store. Idempotent. |
-| `envstow set <NAME>` | Store a value read from **stdin** (keeps it off the command line). |
+| `envstow set <NAME> [--clipboard]` | Store a value read from **stdin**, or the OS clipboard with `--clipboard` (`-c`). Never in argv either way. |
 | `envstow delete <NAME> [--force]` | Remove one secret; re-encrypt (then **rotate**). Confirms on a TTY. |
 | `envstow edit` | Decrypt all secrets into `$EDITOR`, re-encrypt on save (temp file shredded). |
 | `envstow get <NAME> [--show]` | Resolve one secret by name. **Masked under an agent** unless `--show`. |

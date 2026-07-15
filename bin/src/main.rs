@@ -4,6 +4,7 @@
 //!
 //! Commands:
 //!   envstow get <NAME> [--show]     Resolve one secret by name (masked under an agent).
+//!   envstow set <NAME> [--clipboard] Store a value from stdin, or the OS clipboard.
 //!   envstow delete <NAME>           Remove one secret and re-encrypt (then rotate!).
 //!   envstow unlock [-- <cmd>...]    Spawn a subshell / run a command with the whole env set.
 //!   envstow init                    Generate an identity, add self as recipient, create store.
@@ -289,6 +290,7 @@ fn cmd_get(args: &[String]) -> i32 {
 
 /// `envstow set <NAME>` — read a value from STDIN (never argv) and store it under NAME,
 /// re-encrypting the store. Reading from stdin keeps the literal value off the command line.
+/// `--clipboard` reads the OS clipboard instead of stdin (same guarantee: never in argv).
 fn cmd_set(args: &[String]) -> i32 {
     let (profile, args) = match resolve_profile(args) {
         Ok(p) => p,
@@ -297,10 +299,28 @@ fn cmd_set(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let Some(name) = args.first() else {
+    let mut from_clipboard = false;
+    let mut name: Option<&str> = None;
+    for a in &args {
+        match a.as_str() {
+            "--clipboard" | "-c" => from_clipboard = true,
+            s if s.starts_with('-') => {
+                eprintln!("envstow set: unknown flag '{s}'");
+                return 2;
+            }
+            s => {
+                if name.is_some() {
+                    eprintln!("envstow set: expected a single NAME");
+                    return 2;
+                }
+                name = Some(s);
+            }
+        }
+    }
+    let Some(name) = name else {
         eprintln!(
-            "envstow set: usage: envstow set <NAME> [--profile P]   (then type the value + Enter, \
-             or pipe it: `printf '%s' value | envstow set <NAME>`)"
+            "envstow set: usage: envstow set <NAME> [--profile P] [--clipboard]   (then type the \
+             value + Enter, or pipe it: `printf '%s' value | envstow set <NAME>`)"
         );
         return 2;
     };
@@ -308,13 +328,26 @@ fn cmd_set(args: &[String]) -> i32 {
         eprintln!("envstow set: NAME must be non-empty and contain no '='.");
         return 2;
     }
+    let name = name.to_string();
+    let name = &name;
 
-    // Read the value from stdin. Two modes:
+    // Read the value. Three modes, none of which put it in argv:
+    //   * --clipboard: shell out to the platform's paste tool (see read_clipboard).
     //   * interactive TTY (you typing): prompt, then read ONE line — finishes on Enter.
     //   * piped (`printf … | envstow set`): read ALL of stdin, so multi-line values survive.
-    // Either way the value never appears on the command line.
     let mut value = String::new();
-    let read = if io::stdin().is_terminal() {
+    let read = if from_clipboard {
+        match read_clipboard() {
+            Ok(v) => {
+                value = v;
+                Ok(0)
+            }
+            Err(e) => {
+                eprintln!("envstow set: {e}");
+                return 1;
+            }
+        }
+    } else if io::stdin().is_terminal() {
         eprint!("Enter value for {name} (press Enter to finish): ");
         let _ = io::stderr().flush();
         io::stdin().read_line(&mut value)
@@ -323,6 +356,10 @@ fn cmd_set(args: &[String]) -> i32 {
     };
     if read.is_err() {
         eprintln!("envstow set: could not read value from stdin.");
+        return 1;
+    }
+    if from_clipboard && value.is_empty() {
+        eprintln!("envstow set: the clipboard is empty — nothing to store.");
         return 1;
     }
     // Trim a single trailing newline (the Enter keystroke, or a trailing newline from `echo`).
@@ -374,6 +411,69 @@ fn cmd_set(args: &[String]) -> i32 {
         eprintln!("✔  set {name} ({preview})");
     }
     code
+}
+
+/// The platform's clipboard-paste commands, tried in order until one runs. Each writes the
+/// clipboard to stdout, so we capture it and never let it touch a shell or the command line.
+///
+/// These are the OS's own tools, not a dependency envstow ships — consistent with `age` being
+/// compiled in rather than shelled out to. On Linux the display server isn't knowable at compile
+/// time (a binary built anywhere may run under Wayland or X11), so we probe both at runtime and
+/// let the first one that exists win.
+#[cfg(target_os = "macos")]
+const CLIPBOARD_CMDS: &[(&str, &[&str])] = &[("pbpaste", &[])];
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const CLIPBOARD_CMDS: &[(&str, &[&str])] = &[
+    ("wl-paste", &["--no-newline"]),
+    ("xclip", &["-selection", "clipboard", "-o"]),
+    ("xsel", &["--clipboard", "--output"]),
+];
+
+#[cfg(windows)]
+const CLIPBOARD_CMDS: &[(&str, &[&str])] =
+    &[("powershell", &["-NoProfile", "-Command", "Get-Clipboard"])];
+
+/// Read the OS clipboard as text. Returns a human-actionable error naming the tool to install if
+/// none of the platform's paste commands are present.
+fn read_clipboard() -> Result<String, String> {
+    let mut missing = Vec::new();
+    for (program, args) in CLIPBOARD_CMDS {
+        let output = Command::new(program).args(*args).output();
+        match output {
+            Ok(out) if out.status.success() => {
+                let mut text = String::from_utf8(out.stdout).map_err(|_| {
+                    format!("clipboard contents are not valid UTF-8 (via {program})")
+                })?;
+                // Strip ONE trailing newline: some tools (pbpaste on a copied line, Get-Clipboard)
+                // append one that isn't part of the value. `set` trims stdin the same way.
+                if text.ends_with('\n') {
+                    text.pop();
+                    if text.ends_with('\r') {
+                        text.pop();
+                    }
+                }
+                return Ok(text);
+            }
+            Ok(out) => {
+                // The tool exists but failed (e.g. xclip with no X display). Surface its own
+                // complaint — it explains the problem better than we can.
+                let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                return Err(if err.is_empty() {
+                    format!("{program} failed to read the clipboard")
+                } else {
+                    format!("{program}: {err}")
+                });
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => missing.push(*program),
+            Err(e) => return Err(format!("could not run {program}: {e}")),
+        }
+    }
+    Err(format!(
+        "no clipboard tool found (tried: {}). Install one, or pipe the value instead: \
+         `<paste-command> | envstow set <NAME>`",
+        missing.join(", ")
+    ))
 }
 
 /// `envstow delete <NAME>` — remove one secret from the store and re-encrypt.
@@ -1325,7 +1425,7 @@ fn print_help() {
          \n\
          USAGE:\n\
          \x20 envstow get <NAME> [--show]      Resolve one secret (masked under an agent).\n\
-         \x20 envstow set <NAME>               Read a value from stdin and store it.\n\
+         \x20 envstow set <NAME> [--clipboard] Read a value from stdin (or clipboard) and store it.\n\
          \x20 envstow delete <NAME>            Remove one secret and re-encrypt (then rotate).\n\
          \x20 envstow edit                     Edit all secrets in $EDITOR (decrypt/re-encrypt).\n\
          \x20 envstow list                     List secret NAMES (never values).\n\
@@ -1343,6 +1443,7 @@ fn print_help() {
          \x20 envstow --version                Print the envstow version.\n\
          \n\
          EXAMPLES:\n\
+         \x20 envstow set MY_TOKEN --clipboard         # store a secret straight from the clipboard\n\
          \x20 do-thing \"$(envstow get DB_PASSWORD)\"   # by name; masked if an agent runs it bare\n\
          \x20 envstow unlock -- npm run build          # run one command with all secrets set\n\
          \x20 envstow unlock                           # start your AI in an unlocked subshell\n\

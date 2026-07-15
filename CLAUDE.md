@@ -29,7 +29,8 @@ install or invoke.
 
 - `envstow get <NAME>` — resolve one secret by name (masked under an agent; `--show` to reveal).
 - `envstow unlock [-- <cmd>]` — run a command (or a subshell) with all secrets set as env vars.
-- `envstow set <NAME>` — store a value read from **stdin** (keeps it off the command line).
+- `envstow set <NAME> [--clipboard]` — store a value read from **stdin**, or the OS clipboard
+  with `--clipboard`. Both keep the value off the command line.
 - `envstow delete <NAME>` — remove one secret and re-encrypt (`--force` to skip the prompt).
 - `envstow edit` — open all secrets in `$EDITOR` (decrypt → edit → re-encrypt).
 - `envstow list` — list secret **names** (never values).

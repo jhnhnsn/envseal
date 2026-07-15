@@ -170,6 +170,31 @@ fn write_fake_editor(dir: &Path) -> PathBuf {
     }
 }
 
+/// Write a fake clipboard tool onto a private dir that echoes `contents`, named for whatever the
+/// host platform's real paste command is. Returns the dir to prepend to PATH, so `set --clipboard`
+/// finds this instead of the developer's actual clipboard — tests must never read or depend on it.
+#[cfg(unix)]
+fn write_fake_clipboard(dir: &Path, contents: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let bin_dir = dir.join("fakebin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    // Match the first command envstow tries on this platform.
+    let name = if cfg!(target_os = "macos") {
+        "pbpaste"
+    } else {
+        "wl-paste"
+    };
+    let tool = bin_dir.join(name);
+    // `cat <<'EOF'` keeps the value out of argv and preserves it byte-for-byte.
+    std::fs::write(
+        &tool,
+        format!("#!/bin/sh\ncat <<'ENVSTOW_EOF'\n{contents}\nENVSTOW_EOF\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    bin_dir
+}
+
 /// Assert the store on disk is age ciphertext, never the given plaintext.
 fn store_is_encrypted(path: &Path, plaintext_needle: &str) {
     let bytes = std::fs::read(path).expect("read store");
@@ -434,6 +459,69 @@ fn get_masks_under_agent_but_reveals_with_show() {
 
     // Unknown name → exit 1.
     assert_eq!(repo.run(&["get", "NOPE"], "").code, 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn set_clipboard_stores_the_clipboard_contents() {
+    let repo = Repo::new("clip");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+
+    let bin_dir = write_fake_clipboard(&repo.dir, "sk-clip-abc123");
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let out = repo.run_env(&["set", "CLIP_TOKEN", "--clipboard"], "", "PATH", &path);
+    assert_eq!(out.code, 0, "set --clipboard failed: {}", out.stderr);
+
+    // The value never appears in our output — only a masked confirmation.
+    assert!(
+        !out.stderr.contains("sk-clip-abc123") && !out.stdout.contains("sk-clip-abc123"),
+        "clipboard value must not be printed: {} {}",
+        out.stdout,
+        out.stderr
+    );
+
+    // It round-trips exactly, with the tool's trailing newline stripped.
+    let check = repo.run(
+        &[
+            "unlock",
+            "--",
+            "sh",
+            "-c",
+            "test \"$CLIP_TOKEN\" = sk-clip-abc123 && echo OK",
+        ],
+        "",
+    );
+    assert!(
+        check.stdout.contains("OK"),
+        "clipboard value did not round-trip: {} {}",
+        check.stdout,
+        check.stderr
+    );
+    store_is_encrypted(&repo.store(), "sk-clip-abc123");
+}
+
+#[cfg(unix)]
+#[test]
+fn set_clipboard_errors_when_no_tool_is_available() {
+    let repo = Repo::new("cliperr");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+
+    // An empty PATH means no paste tool exists — must fail loudly, not store an empty value.
+    let out = repo.run_env(&["set", "NOPE", "--clipboard"], "", "PATH", "");
+    assert_ne!(out.code, 0, "should fail with no clipboard tool");
+    assert!(
+        out.stderr.contains("no clipboard tool found"),
+        "should name the problem and suggest piping: {}",
+        out.stderr
+    );
+    assert!(
+        !repo.run(&["list"], "").stdout.contains("NOPE"),
+        "must not create the secret when the clipboard read fails"
+    );
 }
 
 #[test]

@@ -2,6 +2,17 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.8
+
+### Added
+- **`envstow set <NAME> --clipboard`** (`-c`). Read the value straight from the OS clipboard
+  instead of stdin, so you don't have to remember your platform's paste command. Uses the
+  system's own tool — `pbpaste` (macOS), `wl-paste`/`xclip`/`xsel` (Linux, probed at runtime so
+  one binary covers Wayland and X11), `Get-Clipboard` (Windows) — and errors with a hint to pipe
+  instead if none is installed. The value never touches argv or shell history, one trailing
+  newline is stripped (matching stdin), and an empty clipboard is refused rather than stored.
+  Piping (`pbpaste | envstow set NAME`) still works and is unchanged.
+
 ## 0.1.7
 
 ### Added

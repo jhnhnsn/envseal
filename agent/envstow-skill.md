@@ -59,10 +59,14 @@ Do NOT put the value as a command-line argument (it lands in shell history). Hav
 provide it via stdin — a paste from their password manager, an interactive prompt, or a file:
 
 ```bash
-pbpaste | envstow set SOME_TOKEN                 # human pastes from clipboard (macOS)
+envstow set SOME_TOKEN --clipboard                # human copies it, you run this — no value in argv
 envstow set SOME_TOKEN                            # interactive: prompts, human types + Enter
+pbpaste | envstow set SOME_TOKEN                  # human pastes from clipboard (macOS)
 envstow set TLS_KEY < key.pem                     # multi-line value (PEM, cert, JSON) from a file
 ```
+
+`--clipboard` is the smoothest one for you to run on a human's behalf: ask them to copy the
+secret, then run it. The value goes clipboard → store without passing through you.
 
 After changing secrets, remind the human to `git add .envstow && git commit`.
 
