@@ -8,8 +8,11 @@
 //!     Never committed; created mode 0600 on Unix.
 //!   * Recipients (PUBLIC keys): `.envstow/recipients`. Committed. One `age1...` per line;
 //!     `#` comments and optional trailing `# Name` allowed. Shared across all profiles.
-//!   * Encrypted stores: `.envstow/<profile>.enc` (age binary), one per profile. Committed.
-//!     The default profile is `.envstow/default.enc`. Plaintext payload is dotenv.
+//!   * Encrypted stores: `.envstow/<profile>.enc`, one per profile. Committed. The default
+//!     profile is `.envstow/default.enc`. Each file is an `envstow-format: <n>` header line
+//!     followed by the age payload; the decrypted plaintext is dotenv. The header is checked
+//!     before decryption so a store from a newer envstow reports that plainly instead of
+//!     failing as a decryption error — see [`FORMAT_VERSION`].
 //!
 //! The repo root is whatever directory (walking up from the CWD) contains a `.envstow/recipients`
 //! file — that anchors the stores and any relative operations.
@@ -27,6 +30,59 @@ pub const RECIPIENTS_FILE: &str = ".envstow/recipients";
 pub const STORE_FILE: &str = ".envstow/default.enc";
 /// The name of the default (unnamed) profile.
 pub const DEFAULT_PROFILE: &str = "default";
+
+/// Where to send someone whose envstow is too old to read a store.
+pub const REPO_URL: &str = "https://github.com/jhnhnsn/envstow";
+
+/// The on-disk store format this binary reads and writes.
+///
+/// This versions the *file layout*, not the tool — bump it only when the bytes change shape in a
+/// way an older binary would misread (a new envelope, a different payload encoding, a header
+/// field). Ordinary releases leave it alone: 0.1.6 → 0.1.7 added a command and did NOT touch the
+/// format. Bumping it on every release would cry wolf and train people to ignore the warning.
+///
+/// When you DO bump it, both guards below start firing for anyone on an older binary — a read
+/// gets [`LayoutError::FormatTooNew`], a write gets [`LayoutError::FormatWouldDowngrade`] — each
+/// naming the version and pointing at [`REPO_URL`]. Add a note to CHANGELOG.md saying the format
+/// moved and that everyone sharing a store must update.
+///
+/// History:
+///   * 1 — headerless: the file is a bare age payload. Everything envstow wrote before 0.1.9.
+///   * 2 — the `envstow-format:` header, added in 0.1.9. This bump is the one break the scheme
+///     couldn't avoid: a binary with no header code (≤ 0.1.8) sees the header as a corrupt age
+///     envelope and reports "decryption failed: Header is invalid". That's precisely the
+///     cryptic failure the header exists to prevent — but it can only be prevented for versions
+///     that already know to look for it. From 2 onward, an old binary gets a real explanation.
+pub const FORMAT_VERSION: u32 = 2;
+
+/// The header line prefixed to every store: `envstow-format: <n>\n`, before the age payload.
+///
+/// It lives OUTSIDE the ciphertext deliberately. A version sealed inside the encrypted payload is
+/// unreadable until after decryption — useless for catching an envelope change, which is exactly
+/// the case that would otherwise surface as the maximally-confusing "No matching keys found"
+/// (indistinguishable from "you were removed as a recipient"). age itself does the same thing
+/// with its own `age-encryption.org/v1` line. The version is public metadata, not a secret.
+const FORMAT_PREFIX: &str = "envstow-format: ";
+
+/// Split a store file's bytes into `(format, ciphertext)`.
+///
+/// A store with no header is format 1: every store written before 0.1.9 starts directly with
+/// age's own `age-encryption.org/v1` line. Reading those still works — this binary upgrades them
+/// to format 2 the next time anything writes. (The reverse isn't true: a ≤0.1.8 binary can't read
+/// what we write. See [`FORMAT_VERSION`].)
+fn split_format_header(bytes: &[u8]) -> Result<(u32, &[u8]), LayoutError> {
+    let Some(rest) = bytes.strip_prefix(FORMAT_PREFIX.as_bytes()) else {
+        return Ok((1, bytes));
+    };
+    let Some(nl) = rest.iter().position(|b| *b == b'\n') else {
+        return Err(LayoutError::BadFormatHeader);
+    };
+    let digits = std::str::from_utf8(&rest[..nl])
+        .map_err(|_| LayoutError::BadFormatHeader)?
+        .trim();
+    let version: u32 = digits.parse().map_err(|_| LayoutError::BadFormatHeader)?;
+    Ok((version, &rest[nl + 1..]))
+}
 
 /// The store filename for a given profile, relative to the repo root: `.envstow/<profile>.enc`.
 pub fn store_file_for(profile: &str) -> String {
@@ -58,6 +114,16 @@ pub enum LayoutError {
     Io(String),
     NoIdentity(PathBuf),
     Empty(&'static str),
+    /// The store is a newer format than this binary can read.
+    FormatTooNew {
+        found: u32,
+    },
+    /// The store is a newer format than this binary writes; writing would downgrade it.
+    FormatWouldDowngrade {
+        found: u32,
+    },
+    /// The header is present but unparseable — a truncated or corrupted file.
+    BadFormatHeader,
 }
 
 impl std::fmt::Display for LayoutError {
@@ -78,6 +144,27 @@ impl std::fmt::Display for LayoutError {
                 p.display()
             ),
             LayoutError::Empty(what) => write!(f, "{what} is empty"),
+            LayoutError::FormatTooNew { found } => write!(
+                f,
+                "this store uses format {found}, but your envstow only understands format \
+                 {FORMAT_VERSION}.\n\
+                 A teammate wrote it with a newer envstow. Update yours to read it:\n\
+                 \x20  {REPO_URL}"
+            ),
+            LayoutError::FormatWouldDowngrade { found } => write!(
+                f,
+                "refusing to write — this store is format {found} and your envstow writes format \
+                 {FORMAT_VERSION}.\n\
+                 Writing would downgrade it and break it for teammates on a newer envstow. \
+                 Update yours first:\n\
+                 \x20  {REPO_URL}"
+            ),
+            LayoutError::BadFormatHeader => write!(
+                f,
+                "the store's `{}` header is malformed — the file looks truncated or corrupted. \
+                 Restore it from git history (`git checkout -- .envstow/`).",
+                FORMAT_PREFIX.trim_end()
+            ),
         }
     }
 }
@@ -261,20 +348,52 @@ pub fn read_recipients(path: &Path) -> Result<Vec<Recipient>, LayoutError> {
     Ok(parse_recipients(&text))
 }
 
-/// Read the raw encrypted store bytes.
+/// Read the encrypted store, verifying the format header and stripping it.
+///
+/// Returns the age ciphertext alone, so callers hand `crypto::decrypt` exactly what it expects.
+/// The format check runs BEFORE any crypto, so a store from a newer envstow fails with a clear
+/// "update your envstow" rather than a decryption error that reads like a permissions problem.
 pub fn read_store(path: &Path) -> Result<Vec<u8>, LayoutError> {
     if !path.is_file() {
         return Err(LayoutError::NoStore);
     }
-    fs::read(path).map_err(|e| LayoutError::Io(e.to_string()))
+    let bytes = fs::read(path).map_err(|e| LayoutError::Io(e.to_string()))?;
+    let (version, ciphertext) = split_format_header(&bytes)?;
+    if version > FORMAT_VERSION {
+        return Err(LayoutError::FormatTooNew { found: version });
+    }
+    Ok(ciphertext.to_vec())
 }
 
-/// Write the encrypted store bytes, creating the `secrets/` dir if needed.
+/// Read just the format version of an existing store, without reading it as a store. Used by the
+/// write guard, which must inspect a file it may be about to refuse. A store that doesn't exist
+/// yet (init, `profile create`) has no format to conflict with.
+fn store_format(path: &Path) -> Result<Option<u32>, LayoutError> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let bytes = fs::read(path).map_err(|e| LayoutError::Io(e.to_string()))?;
+    let (version, _) = split_format_header(&bytes)?;
+    Ok(Some(version))
+}
+
+/// Write the encrypted store with this binary's format header, creating `.envstow/` if needed.
+///
+/// Refuses to overwrite a store written in a NEWER format: an old binary re-encrypting a newer
+/// store would silently downgrade it and break every teammate who has already updated. The read
+/// guard alone can't catch this — by the time anyone reads it, the damage is committed.
 pub fn write_store(path: &Path, ciphertext: &[u8]) -> Result<(), LayoutError> {
+    if let Some(found) = store_format(path)? {
+        if found > FORMAT_VERSION {
+            return Err(LayoutError::FormatWouldDowngrade { found });
+        }
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| LayoutError::Io(e.to_string()))?;
     }
-    fs::write(path, ciphertext).map_err(|e| LayoutError::Io(e.to_string()))
+    let mut out = format!("{FORMAT_PREFIX}{FORMAT_VERSION}\n").into_bytes();
+    out.extend_from_slice(ciphertext);
+    fs::write(path, out).map_err(|e| LayoutError::Io(e.to_string()))
 }
 
 #[cfg(test)]
@@ -340,5 +459,106 @@ mod tests {
     #[test]
     fn skips_blank_and_comment_lines() {
         assert!(parse_recipients("\n\n#only comments\n#age1notreal\n").is_empty());
+    }
+
+    #[test]
+    fn headerless_store_is_format_1() {
+        // Every store written before the header existed begins with age's own line. These must
+        // keep working untouched — that's what makes the header a silent, migration-free rollout.
+        let legacy = b"age-encryption.org/v1\n-----> X25519 abc\npayload";
+        let (version, ciphertext) = split_format_header(legacy).unwrap();
+        assert_eq!(version, 1, "absent header means format 1");
+        assert_eq!(
+            ciphertext, legacy,
+            "ciphertext must be passed through whole"
+        );
+    }
+
+    #[test]
+    fn header_is_split_from_the_ciphertext() {
+        let stored = b"envstow-format: 1\nage-encryption.org/v1\npayload";
+        let (version, ciphertext) = split_format_header(stored).unwrap();
+        assert_eq!(version, 1);
+        assert_eq!(
+            ciphertext, b"age-encryption.org/v1\npayload",
+            "the age payload must come back byte-exact, header removed"
+        );
+    }
+
+    #[test]
+    fn a_newer_format_is_reported_not_guessed_at() {
+        let future = b"envstow-format: 7\nage-encryption.org/v1\npayload";
+        let (version, _) = split_format_header(future).unwrap();
+        assert_eq!(
+            version, 7,
+            "parse must report the real version, not clamp it"
+        );
+        assert!(version > FORMAT_VERSION, "7 is newer than we understand");
+    }
+
+    #[test]
+    fn malformed_headers_are_rejected() {
+        // Truncated (no newline) and non-numeric versions are corruption, not a format we can
+        // reason about — better to say so than to guess.
+        for bad in [
+            &b"envstow-format: 1"[..],
+            &b"envstow-format: abc\npayload"[..],
+            &b"envstow-format: \npayload"[..],
+        ] {
+            assert!(
+                matches!(split_format_header(bad), Err(LayoutError::BadFormatHeader)),
+                "should reject malformed header: {:?}",
+                String::from_utf8_lossy(bad)
+            );
+        }
+    }
+
+    #[test]
+    fn write_store_refuses_to_downgrade_a_newer_store() {
+        // No CLI path reaches this today — set/delete/edit all decrypt first, so the READ guard
+        // fires before this one. It's a backstop: it makes downgrade-safety a property of the
+        // layout layer, so a future command that writes without reading first can't silently
+        // break a newer teammate's store. Tested here because only a unit test can reach it.
+        let dir = env::temp_dir().join(format!("envstow-fmt-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let store = dir.join("future.enc");
+        fs::write(&store, b"envstow-format: 42\nage-encryption.org/v1\n").unwrap();
+
+        let err = write_store(&store, b"age-encryption.org/v1\nnew").unwrap_err();
+        assert!(
+            matches!(err, LayoutError::FormatWouldDowngrade { found: 42 }),
+            "should refuse, got {err:?}"
+        );
+        assert_eq!(
+            fs::read(&store).unwrap(),
+            b"envstow-format: 42\nage-encryption.org/v1\n",
+            "the refused write must leave the file untouched"
+        );
+
+        // A store at our own format is fine to overwrite, and gets the header back.
+        let ours = dir.join("ours.enc");
+        fs::write(&ours, format!("{FORMAT_PREFIX}{FORMAT_VERSION}\nold")).unwrap();
+        write_store(&ours, b"age-encryption.org/v1\nnew").unwrap();
+        assert_eq!(
+            fs::read(&ours).unwrap(),
+            format!("{FORMAT_PREFIX}{FORMAT_VERSION}\nage-encryption.org/v1\nnew").into_bytes()
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn format_errors_name_the_version_and_the_repo() {
+        // The message IS the feature: it must say what to do, not just what went wrong.
+        let too_new = LayoutError::FormatTooNew { found: 2 }.to_string();
+        assert!(too_new.contains("format 2"), "names the found version");
+        assert!(too_new.contains(REPO_URL), "points at the repo: {too_new}");
+
+        let downgrade = LayoutError::FormatWouldDowngrade { found: 2 }.to_string();
+        assert!(
+            downgrade.contains("refusing to write"),
+            "leads with refusal"
+        );
+        assert!(downgrade.contains(REPO_URL), "points at the repo");
     }
 }

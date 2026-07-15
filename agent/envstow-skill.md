@@ -89,6 +89,12 @@ rotate it at its source too. Deletion is per-profile — a name in `dev` and `pr
   run `envstow init` in a repo that already has a store elsewhere.
 - **`decryption failed: No matching keys found`** — the current identity isn't a recipient of
   this store. The human needs to be added (see Onboarding) and the store re-encrypted.
+- **`this store uses format N, but your envstow only understands format M`** — a teammate wrote
+  the store with a newer envstow. Tell the human to update; the message links the repo. Don't try
+  to work around it — the store is fine, the binary is old.
+- **`decryption failed: Header is invalid`** — usually the same cause, but from the other side:
+  an envstow ≤ 0.1.8 (which predates the format header) reading a store written by ≥ 0.1.9. Have
+  the human update.
 - **`envstow set` seems to hang** — it's waiting on stdin. Have the human pipe or type the value.
 - **`command not found: envstow`** — not installed. Point the human at the installer:
   `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.sh | sh`

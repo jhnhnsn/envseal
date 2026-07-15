@@ -2,6 +2,31 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.9
+
+### Changed (breaking — everyone sharing a store must update to ≥ 0.1.9)
+- **Stores now carry a format header** (`envstow-format: 2`) on the first line, before the age
+  payload. **Anyone still on ≤ 0.1.8 who reads a store written by 0.1.9 gets
+  `decryption failed: Header is invalid`** — their binary predates the header and can't recognize
+  it. Update everyone on a shared store; no re-init or migration is needed beyond that. Your
+  existing stores are read fine by 0.1.9 (a headerless store is format 1) and are upgraded to
+  format 2 the first time anything writes them.
+
+### Added
+- **Store format versioning, with an upgrade prompt.** envstow now checks a store's format before
+  attempting decryption and, when it's too new, says so and points at the repo:
+  ```
+  envstow: this store uses format 3, but your envstow only understands format 2.
+           A teammate wrote it with a newer envstow. Update yours to read it:
+             https://github.com/jhnhnsn/envstow
+  ```
+  Previously a format change surfaced as `decryption failed: No matching keys found` —
+  indistinguishable from "you were removed as a recipient", sending people to chase the wrong
+  problem. The check runs before any crypto, so it catches envelope changes too. A matching guard
+  refuses to overwrite a store newer than the running binary, so an old envstow can't silently
+  downgrade a store and break it for teammates who have updated.
+  This is the last format change that breaks quietly; every one after it explains itself.
+
 ## 0.1.8
 
 ### Added

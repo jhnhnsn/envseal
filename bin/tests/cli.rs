@@ -195,14 +195,20 @@ fn write_fake_clipboard(dir: &Path, contents: &str) -> PathBuf {
     bin_dir
 }
 
-/// Assert the store on disk is age ciphertext, never the given plaintext.
+/// Assert the store on disk is age ciphertext behind envstow's format header, never the given
+/// plaintext. The header is a plaintext line before the age payload — everything after it must
+/// still be a real age file.
 fn store_is_encrypted(path: &Path, plaintext_needle: &str) {
     let bytes = std::fs::read(path).expect("read store");
     let as_text = String::from_utf8_lossy(&bytes);
+    let payload = as_text
+        .split_once('\n')
+        .map(|(_header, rest)| rest)
+        .unwrap_or(&as_text);
     assert!(
-        as_text.starts_with("age-encryption.org/") || bytes.starts_with(b"age"),
-        "store should be an age file, got {:?}...",
-        as_text.chars().take(30).collect::<String>()
+        payload.starts_with("age-encryption.org/"),
+        "store should be an age file behind the format header, got {:?}...",
+        as_text.chars().take(40).collect::<String>()
     );
     assert!(
         !as_text.contains(plaintext_needle),
@@ -521,6 +527,114 @@ fn set_clipboard_errors_when_no_tool_is_available() {
     assert!(
         !repo.run(&["list"], "").stdout.contains("NOPE"),
         "must not create the secret when the clipboard read fails"
+    );
+}
+
+#[test]
+fn store_carries_a_format_header() {
+    let repo = Repo::new("fmthdr");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "TOKEN"], "headervalue").code, 0);
+
+    let bytes = std::fs::read(repo.store()).unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        text.starts_with("envstow-format: 2\n"),
+        "store should lead with the format header, got {:?}...",
+        text.chars().take(30).collect::<String>()
+    );
+    // The header is metadata, not a leak: the value is still encrypted behind it.
+    assert!(
+        !text.contains("headervalue"),
+        "header must not disturb encryption"
+    );
+}
+
+#[test]
+fn headerless_store_still_reads() {
+    // A store written by envstow <= 0.1.8 has no header. Simulate one by stripping the header
+    // from a fresh store, then confirm this binary still reads it. Old stores stay readable;
+    // only the reverse (a pre-0.1.9 binary reading what we write) is the break.
+    let repo = Repo::new("legacy");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "OLD"], "legacyvalue").code, 0);
+
+    let bytes = std::fs::read(repo.store()).unwrap();
+    let nl = bytes.iter().position(|b| *b == b'\n').unwrap();
+    std::fs::write(repo.store(), &bytes[nl + 1..]).unwrap();
+    assert!(
+        String::from_utf8_lossy(&std::fs::read(repo.store()).unwrap())
+            .starts_with("age-encryption.org/"),
+        "test setup: should now look like a pre-header store"
+    );
+
+    let check = repo.run(
+        &[
+            "unlock",
+            "--",
+            "sh",
+            "-c",
+            "test \"$OLD\" = legacyvalue && echo OK",
+        ],
+        "",
+    );
+    assert!(
+        check.stdout.contains("OK"),
+        "a headerless (pre-0.1.9) store must still decrypt: {} {}",
+        check.stdout,
+        check.stderr
+    );
+
+    // …and writing it back upgrades it to a headered store, silently.
+    assert_eq!(repo.run(&["set", "NEW"], "another").code, 0);
+    assert!(
+        String::from_utf8_lossy(&std::fs::read(repo.store()).unwrap())
+            .starts_with("envstow-format: 2\n"),
+        "a write should upgrade a format-1 store to a headered format-2 one"
+    );
+}
+
+#[test]
+fn a_newer_format_store_is_refused_with_an_upgrade_hint() {
+    let repo = Repo::new("fmtnew");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "TOKEN"], "futurevalue").code, 0);
+
+    // Forge a store from a hypothetical future envstow by bumping only the header.
+    let bytes = std::fs::read(repo.store()).unwrap();
+    let nl = bytes.iter().position(|b| *b == b'\n').unwrap();
+    let mut forged = b"envstow-format: 99\n".to_vec();
+    forged.extend_from_slice(&bytes[nl + 1..]);
+    std::fs::write(repo.store(), &forged).unwrap();
+
+    // Reading says what's wrong and where to go — NOT "decryption failed".
+    let read = repo.run(&["list"], "");
+    assert_ne!(read.code, 0, "must refuse to read a newer format");
+    assert!(
+        read.stderr.contains("format 99") && read.stderr.contains("github.com/jhnhnsn/envstow"),
+        "read error should name the version and the repo: {}",
+        read.stderr
+    );
+    assert!(
+        !read.stderr.contains("No matching keys"),
+        "must NOT surface the misleading decryption error: {}",
+        read.stderr
+    );
+
+    // Writing is refused too, leaving the newer store intact. In practice `set` trips the READ
+    // guard first (it decrypts before re-encrypting), so that's the message here; layout's write
+    // guard is the backstop beneath it, covered directly in its own unit test.
+    let write = repo.run(&["set", "CLOBBER"], "nope");
+    assert_ne!(write.code, 0, "must not touch a newer store");
+    assert!(
+        write.stderr.contains("format 99") && write.stderr.contains("github.com/jhnhnsn/envstow"),
+        "write path should also explain and point at the repo: {}",
+        write.stderr
+    );
+    assert_eq!(
+        std::fs::read(repo.store()).unwrap(),
+        forged,
+        "the newer store must be left untouched"
     );
 }
 

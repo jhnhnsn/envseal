@@ -20,6 +20,9 @@ Code, Cursor, …) has to paste a secret's plaintext onto a command line.
 .envstow/recipients               # age PUBLIC keys, committed. Who can decrypt.
 .envstow/default.enc              # age-encrypted KEY=value store (default profile), committed.
 .envstow/<profile>.enc            # additional profiles (dev/staging/prod), committed.
+                                  #   Each store starts with an `envstow-format: N` line, so a
+                                  #   too-old envstow tells you to update instead of failing
+                                  #   with a confusing decryption error.
 ~/.config/envstow/identity.txt    # YOUR age private key. Never committed. (0600)
                                   #   Windows: %APPDATA%\envstow\identity.txt
 ```
@@ -310,6 +313,31 @@ casual/accidental AI exposure of values.
 process exfiltrating a live var; plaintext already in git history; retroactive access removal;
 a value someone deliberately reveals with `--show` or re-encodes to evade the redact-guard.
 For those: rotate, and treat this as strong hygiene, not a vault.
+
+---
+
+## Store format & version mismatches
+
+Each store begins with a plaintext `envstow-format: N` line before the age payload. It versions
+the **file layout**, not the tool — most releases don't touch it (adding `delete` and
+`--clipboard` didn't). It's checked **before** decryption, so a store written by a newer envstow
+tells you what to do:
+
+```
+envstow: this store uses format 3, but your envstow only understands format 2.
+         A teammate wrote it with a newer envstow. Update yours to read it:
+           https://github.com/jhnhnsn/envstow
+```
+
+Without it, that same situation surfaced as `decryption failed: No matching keys found` — which
+looks exactly like "you were removed as a recipient", and sends you chasing the wrong problem.
+An old envstow also refuses to *overwrite* a newer store, so it can't silently downgrade one and
+break it for teammates who have updated.
+
+**Upgrading from ≤ 0.1.8:** the header itself arrived in 0.1.9, so a `≤ 0.1.8` binary reading a
+store that 0.1.9 has written reports `decryption failed: Header is invalid`. Everyone sharing a
+store needs to be on ≥ 0.1.9 — no re-init or migration beyond that. Stores made by older
+versions are read fine and are upgraded in place the first time anything writes them.
 
 ---
 
