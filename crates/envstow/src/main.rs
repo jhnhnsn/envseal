@@ -34,8 +34,10 @@ use zeroize::Zeroize;
 
 mod crypto;
 mod layout;
+mod secrets;
 
 use layout::Recipient;
+use secrets::Secrets;
 
 fn main() {
     let mut args: Vec<String> = env::args().skip(1).collect();
@@ -133,9 +135,9 @@ fn resolve_profile(args: &[String]) -> Result<(String, Vec<String>), String> {
     Ok((profile, rest))
 }
 
-/// Decrypt the located store for `profile` with the user's identity into ordered (name, value)
-/// pairs. The caller owns zeroizing the returned values.
-fn load_secrets(profile: &str) -> Result<Vec<(String, String)>, String> {
+/// Decrypt the located store for `profile` with the user's identity into a [`Secrets`] (whose
+/// values are zeroized on drop).
+fn load_secrets(profile: &str) -> Result<Secrets, String> {
     let paths = layout::locate(profile).map_err(|e| e.to_string())?;
     let secret = layout::read_identity_secret().map_err(|e| e.to_string())?;
     let identity = crypto::parse_identity(&secret).map_err(|e| e.to_string())?;
@@ -158,7 +160,7 @@ fn load_secrets(profile: &str) -> Result<Vec<(String, String)>, String> {
         let decoded = crypto::decode_value(&v).map_err(|e| e.to_string())?;
         vars.push((k, decoded));
     }
-    Ok(vars)
+    Ok(Secrets::from_pairs(vars))
 }
 
 /// Turn age's `No matching keys found` into an error that says what to actually do.
@@ -301,7 +303,7 @@ fn cmd_get(args: &[String]) -> i32 {
         return 2;
     };
 
-    let mut vars = match load_secrets(&profile) {
+    let secrets = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -309,13 +311,9 @@ fn cmd_get(args: &[String]) -> i32 {
         }
     };
 
-    let found = vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
-    // Scrub every value we loaded; we only keep the one we need below.
-    for (_, v) in vars.iter_mut() {
-        v.zeroize();
-    }
-
-    let Some(mut value) = found else {
+    // `secrets` (and thus every value, including the one we print below) is zeroized when it drops
+    // at the end of this function — no manual scrubbing needed.
+    let Some(value) = secrets.get(name) else {
         eprintln!("envstow: no secret named '{name}'");
         return 1;
     };
@@ -330,14 +328,13 @@ fn cmd_get(args: &[String]) -> i32 {
         let _ = out.flush();
     } else {
         // Masked: tell the human/agent how to reveal, without leaking the value.
-        println!("{}", mask(&value));
+        println!("{}", mask(value));
         eprintln!(
             "envstow: value masked (running under an agent or a terminal). \
              Use it by name via `envstow unlock -- <cmd using ${name}>`, \
              or pass --show to reveal."
         );
     }
-    value.zeroize();
     0
 }
 
@@ -435,7 +432,7 @@ fn cmd_set(args: &[String]) -> i32 {
             return 1;
         }
     };
-    let mut vars = match load_secrets(&profile) {
+    let mut secrets = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -444,7 +441,6 @@ fn cmd_set(args: &[String]) -> i32 {
         }
     };
 
-    // Upsert.
     // Compute a masked preview (first few chars + asterisks) so a HUMAN can sanity-check the
     // paste. Under an agent, even the first few chars shouldn't reach the transcript, so mask
     // fully. Preview never holds more than the first 5 chars of the value.
@@ -454,16 +450,11 @@ fn cmd_set(args: &[String]) -> i32 {
         masked_preview(&value)
     };
 
-    match vars.iter_mut().find(|(k, _)| k == name) {
-        Some((_, v)) => {
-            v.zeroize();
-            *v = value.clone();
-        }
-        None => vars.push((name.clone(), value.clone())),
-    }
-    value.zeroize();
+    // Hand the value to the store (upsert scrubs any prior value it replaces). `value` is moved
+    // in, so nothing left here to zeroize; `secrets` scrubs everything on drop.
+    secrets.upsert(name, value);
 
-    let code = write_secrets(&paths.recipients, &paths.store, &mut vars);
+    let code = write_secrets(&paths.recipients, &paths.store, &secrets);
     if code == 0 {
         eprintln!("✔  set {name} ({preview})");
         nudge_if_unlocked_shell();
@@ -577,7 +568,7 @@ fn cmd_delete(args: &[String]) -> i32 {
             return 1;
         }
     };
-    let mut vars = match load_secrets(&profile) {
+    let mut secrets = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -585,10 +576,7 @@ fn cmd_delete(args: &[String]) -> i32 {
         }
     };
 
-    if !vars.iter().any(|(k, _)| k == name) {
-        for (_, v) in vars.iter_mut() {
-            v.zeroize();
-        }
+    if !secrets.contains(name) {
         eprintln!("envstow: no secret named '{name}'");
         return 1;
     }
@@ -603,21 +591,15 @@ fn cmd_delete(args: &[String]) -> i32 {
         let confirmed = io::stdin().read_line(&mut input).is_ok()
             && matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes");
         if !confirmed {
-            for (_, v) in vars.iter_mut() {
-                v.zeroize();
-            }
             eprintln!("   aborted — store left unchanged.");
             return 1;
         }
     }
 
-    // Drop the entry, scrubbing its value rather than just letting the Vec free it.
-    if let Some(i) = vars.iter().position(|(k, _)| k == name) {
-        let (_, mut value) = vars.remove(i);
-        value.zeroize();
-    }
+    // Drop the entry (its value is zeroized as it leaves the store).
+    secrets.remove(name);
 
-    let code = write_secrets(&paths.recipients, &paths.store, &mut vars);
+    let code = write_secrets(&paths.recipients, &paths.store, &secrets);
     if code == 0 {
         eprintln!("✔  deleted {name}");
         eprintln!(
@@ -639,18 +621,15 @@ fn cmd_list(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let mut vars = match load_secrets(&profile) {
+    let secrets = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
             return 1;
         }
     };
-    for (k, _) in &vars {
-        println!("{k}");
-    }
-    for (_, v) in vars.iter_mut() {
-        v.zeroize();
+    for name in secrets.names() {
+        println!("{name}");
     }
     0
 }
@@ -678,9 +657,9 @@ fn cmd_pubkey() -> i32 {
     }
 }
 
-/// Serialize `vars` to dotenv, encrypt to the current recipients, and write the store.
-/// Zeroizes the plaintext buffer and the values afterward.
-fn write_secrets(recipients_path: &Path, store: &Path, vars: &mut [(String, String)]) -> i32 {
+/// Serialize `secrets` to dotenv, encrypt to the current recipients, and write the store.
+/// Zeroizes the plaintext payload buffer; the caller's `Secrets` scrubs its own values on drop.
+fn write_secrets(recipients_path: &Path, store: &Path, secrets: &Secrets) -> i32 {
     let recipients = layout::read_recipients(recipients_path).unwrap_or_default();
     if recipients.is_empty() {
         eprintln!("envstow: no recipients — cannot encrypt.");
@@ -696,13 +675,10 @@ fn write_secrets(recipients_path: &Path, store: &Path, vars: &mut [(String, Stri
 
     // Multi-line values are stored base64-encoded (see crypto::encode_value), so the dotenv
     // store stays one line per key. render_dotenv applies the encoding.
-    let mut payload = render_dotenv(vars);
+    let mut payload = render_dotenv(secrets.pairs());
 
     let result = crypto::encrypt(payload.as_bytes(), &recips);
     payload.zeroize();
-    for (_, v) in vars.iter_mut() {
-        v.zeroize();
-    }
 
     match result {
         Ok(ct) => match layout::write_store(store, &ct) {
@@ -738,17 +714,15 @@ fn cmd_edit(args: &[String]) -> i32 {
         }
     };
     // Decrypt current contents to text.
-    let mut vars = match load_secrets(&profile) {
+    let secrets = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
             return 1;
         }
     };
-    let mut initial = render_dotenv(&vars);
-    for (_, v) in vars.iter_mut() {
-        v.zeroize();
-    }
+    let mut initial = render_dotenv(secrets.pairs());
+    drop(secrets); // scrub the decrypted values now; the plaintext lives on only in `initial`
 
     // Temp file next to the identity (a per-user, non-repo, ideally-0600 location).
     let tmp = layout::identity_path()
@@ -776,9 +750,9 @@ fn cmd_edit(args: &[String]) -> i32 {
             // Re-read, parse, re-encrypt.
             match std::fs::read_to_string(&tmp) {
                 Ok(mut edited) => {
-                    let mut new_vars = crypto::parse_dotenv(&edited);
+                    let new_secrets = Secrets::from_pairs(crypto::parse_dotenv(&edited));
                     edited.zeroize();
-                    write_secrets(&paths.recipients, &paths.store, &mut new_vars)
+                    write_secrets(&paths.recipients, &paths.store, &new_secrets)
                 }
                 Err(e) => {
                     eprintln!("envstow: could not read edited file: {e}");
@@ -868,28 +842,28 @@ fn cmd_unlock(args: &[String]) -> i32 {
         None => args.to_vec(),
     };
 
-    let vars = match load_secrets(&profile) {
+    let secrets = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
             return 1;
         }
     };
-    if vars.is_empty() {
+    if secrets.is_empty() {
         eprintln!("envstow: store decrypted but contains no variables.");
         return 1;
     }
 
-    let names: Vec<&str> = vars.iter().map(|(k, _)| k.as_str()).collect();
+    let names: Vec<&str> = secrets.names().collect();
     eprintln!(
         "🔓 envstow: loaded {} secret(s) from {}: {}",
         names.len(),
         profile,
         names.join(", ")
     );
-    warn_on_shadowed(&vars);
+    warn_on_shadowed(&secrets);
 
-    spawn_with_env(&cmd, vars)
+    spawn_with_env(&cmd, secrets)
 }
 
 /// Warn about secrets whose names are ALREADY set in our environment with a different value —
@@ -906,15 +880,15 @@ fn cmd_unlock(args: &[String]) -> i32 {
 /// otherwise warn about every name, which is noise, not signal.
 ///
 /// Never prints either value, and never reveals which is which — only that they differ.
-fn warn_on_shadowed(vars: &[(String, String)]) {
-    let shadowed: Vec<&str> = vars
+fn warn_on_shadowed(secrets: &Secrets) {
+    let shadowed: Vec<&str> = secrets
         .iter()
         .filter(|(k, v)| {
             // Compare against the inherited value, if any. Only a DIFFERENT value is a real
             // shadow worth reporting.
-            env::var_os(k).is_some_and(|existing| existing.to_string_lossy() != v.as_str())
+            env::var_os(k).is_some_and(|existing| existing.to_string_lossy() != *v)
         })
-        .map(|(k, _)| k.as_str())
+        .map(|(k, _)| k)
         .collect();
     if shadowed.is_empty() {
         return;
@@ -964,16 +938,16 @@ fn is_shell_identifier(name: &str) -> bool {
 
 /// Build the `ENVSTOW_LOADED` value for a child: the names we're about to set, unioned with any
 /// an outer unlock already recorded (nested unlocks stack, so the outer names are still live).
-fn loaded_marker(vars: &[(String, String)]) -> String {
+fn loaded_marker(secrets: &Secrets) -> String {
     let mut names: Vec<String> = env::var(LOADED_MARKER)
         .unwrap_or_default()
         .split(',')
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect();
-    for (k, _) in vars {
+    for k in secrets.names() {
         if !names.iter().any(|n| n == k) {
-            names.push(k.clone());
+            names.push(k.to_string());
         }
     }
     names.join(",")
@@ -1026,7 +1000,7 @@ fn cmd_refresh(args: &[String]) -> i32 {
         return 1;
     }
 
-    let mut vars = match load_secrets(&profile) {
+    let secrets = match load_secrets(&profile) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("envstow: {e}");
@@ -1036,7 +1010,7 @@ fn cmd_refresh(args: &[String]) -> i32 {
 
     // Stale = envstow set it here, and the store no longer has it. Note we compare against the
     // names WE recorded, not the whole environment, so we never unset someone else's var.
-    let in_store: Vec<&str> = vars.iter().map(|(k, _)| k.as_str()).collect();
+    let in_store: Vec<&str> = secrets.names().collect();
     let stale: Vec<String> = loaded_names()
         .into_iter()
         .filter(|n| !in_store.contains(&n.as_str()) && env::var_os(n).is_some())
@@ -1044,16 +1018,12 @@ fn cmd_refresh(args: &[String]) -> i32 {
 
     // Changed = still in the store, but this shell holds a different value. We can't fix these
     // without printing the new value, so we only report the count.
-    let changed = vars
+    let changed = secrets
         .iter()
-        .filter(|(k, v)| {
-            env::var_os(k).is_some_and(|existing| existing.to_string_lossy() != v.as_str())
-        })
+        .filter(|(k, v)| env::var_os(k).is_some_and(|existing| existing.to_string_lossy() != *v))
         .count();
 
-    for (_, v) in vars.iter_mut() {
-        v.zeroize();
-    }
+    // `secrets` scrubs its values on drop at the end of the function.
 
     // stdout is the eval payload — shell code ONLY, so a stray word can't be executed.
     //
@@ -1334,9 +1304,9 @@ fn cmd_upgrade(args: &[String]) -> i32 {
     }
 }
 
-/// Spawn either the given command or an interactive subshell, with `vars` in its env.
-/// Zeroizes the values after the child has been launched. Returns the child's exit code.
-fn spawn_with_env(cmd: &[String], mut vars: Vec<(String, String)>) -> i32 {
+/// Spawn either the given command or an interactive subshell, with the secrets in its env.
+/// `secrets` scrubs its values on drop, after the child has its own copy. Returns the exit code.
+fn spawn_with_env(cmd: &[String], secrets: Secrets) -> i32 {
     let (program, args, interactive) = if cmd.is_empty() {
         let (sh, sh_args) = default_shell();
         eprintln!("🔓 envstow: launching unlocked subshell. Type `exit` to lock.");
@@ -1351,7 +1321,7 @@ fn spawn_with_env(cmd: &[String], mut vars: Vec<(String, String)>) -> i32 {
 
     let mut command = Command::new(&program);
     command.args(&args);
-    for (k, v) in &vars {
+    for (k, v) in secrets.iter() {
         command.env(k, v);
     }
     command.env("ENVSTOW_UNLOCKED", "1");
@@ -1359,18 +1329,14 @@ fn spawn_with_env(cmd: &[String], mut vars: Vec<(String, String)>) -> i32 {
     // that came from your shell rc or CI — and only ever unset the ones we own. Names only; a
     // name is not a secret (`list` prints them). Nested unlocks union with the outer set, so an
     // inner refresh still knows about the outer store's names.
-    command.env("ENVSTOW_LOADED", loaded_marker(&vars));
+    command.env("ENVSTOW_LOADED", loaded_marker(&secrets));
     command
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
+    // The child inherits a copy of our env at spawn; our `secrets` scrubs on drop (function end).
     let result = command.spawn();
-
-    // The child now has its own copy of the environment; scrub ours.
-    for (_, v) in vars.iter_mut() {
-        v.zeroize();
-    }
 
     let code = match result {
         Ok(mut child) => match child.wait() {
@@ -2042,10 +2008,10 @@ mod tests {
         // Nested unlock: the outer store's names are still live in the environment, so the inner
         // marker must keep them — otherwise a refresh inside the inner shell would forget them.
         env::set_var(LOADED_MARKER, "OUTER_A,SHARED");
-        let inner = vec![
+        let inner = Secrets::from_pairs(vec![
             ("SHARED".to_string(), "v".to_string()),
             ("INNER_B".to_string(), "v".to_string()),
-        ];
+        ]);
         let marker = loaded_marker(&inner);
         let names: Vec<&str> = marker.split(',').collect();
         assert!(names.contains(&"OUTER_A"), "keeps outer names: {marker}");
