@@ -716,6 +716,116 @@ fn upgrade_rejects_unknown_flags() {
     );
 }
 
+/// Drive `envstow scan-leak` with a piped payload and a set of env vars (name -> value).
+/// Returns the exit code and stderr. `ENVSTOW_LOADED` is set to the given names.
+fn scan_leak(env: &[(&str, &str)], payload: &str) -> Output {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut cmd = Command::new(BIN);
+    cmd.args(["scan-leak"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    clear_agent_markers(&mut cmd);
+    let loaded = env.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(",");
+    cmd.env("ENVSTOW_LOADED", loaded);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().expect("spawn envstow");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().expect("wait envstow");
+    Output {
+        code: out.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    }
+}
+
+#[test]
+fn scan_leak_blocks_a_leak_and_allows_a_name_reference() {
+    let secret = "sk-fake-9d4f2a7c1e8b";
+    // A leaked value -> exit 2 (block), the offending NAME reported, the VALUE never printed.
+    let out = scan_leak(
+        &[("FAKE_TOKEN", secret)],
+        &format!(r#"{{"tool_response":{{"stdout":"the token is {secret} here"}}}}"#),
+    );
+    assert_eq!(out.code, 2, "a leak must block (exit 2): {}", out.stderr);
+    assert!(out.stderr.contains("BLOCKED by envstow"), "{}", out.stderr);
+    assert!(
+        out.stderr.contains("$FAKE_TOKEN"),
+        "names the var: {}",
+        out.stderr
+    );
+    assert!(
+        !out.stderr.contains(secret) && !out.stdout.contains(secret),
+        "must never print the value: {} {}",
+        out.stdout,
+        out.stderr
+    );
+
+    // A NAME reference (not the value) -> exit 0 (allow).
+    let ok = scan_leak(
+        &[("FAKE_TOKEN", secret)],
+        r#"{"tool_response":{"stdout":"deploy with $FAKE_TOKEN"}}"#,
+    );
+    assert_eq!(ok.code, 0, "a name reference must pass: {}", ok.stderr);
+}
+
+#[test]
+fn scan_leak_catches_non_conventional_and_multiline_and_ignores_low_entropy() {
+    // DATABASE_URL (no *_KEY/*_TOKEN name) is caught via ENVSTOW_LOADED.
+    let dburl = "postgres://admin:hunter2SECRETval@db/main";
+    let out = scan_leak(
+        &[("DATABASE_URL", dburl)],
+        &format!(r#"{{"tool_response":{{"stdout":"connecting to {dburl}"}}}}"#),
+    );
+    assert_eq!(out.code, 2, "DATABASE_URL leak must block: {}", out.stderr);
+
+    // A multi-line value leaking just its middle line -> block.
+    let mid = scan_leak(
+        &[(
+            "TLS_KEY",
+            "-----BEGIN-----\nMIISECRETMIDDLExyz0000\n-----END-----",
+        )],
+        r#"{"tool_response":{"stdout":"exfiltrated: MIISECRETMIDDLExyz0000"}}"#,
+    );
+    assert_eq!(
+        mid.code, 2,
+        "multi-line middle leak must block: {}",
+        mid.stderr
+    );
+
+    // A low-entropy value (digit run) appearing in output -> allow (no false positive).
+    let low = scan_leak(
+        &[("PIN", "12345678")],
+        r#"{"tool_response":{"stdout":"finished, 12345678 lines"}}"#,
+    );
+    assert_eq!(
+        low.code, 0,
+        "low-entropy value must not over-block: {}",
+        low.stderr
+    );
+}
+
+#[test]
+fn scan_leak_rejects_arguments() {
+    // It reads stdin; a positional arg is a usage error (exit 2, names the mistake).
+    let mut cmd = Command::new(BIN);
+    let out = cmd
+        .args(["scan-leak", "somefile"])
+        .stdin(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("stdin"));
+}
+
 #[cfg(unix)]
 #[test]
 fn refresh_unsets_a_deleted_secret_via_eval() {

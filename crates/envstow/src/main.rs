@@ -9,6 +9,7 @@
 //!   envstow unlock [-- <cmd>...]    Spawn a subshell / run a command with the whole env set.
 //!   envstow refresh                 Emit `unset` lines for secrets that left the store (eval it).
 //!   envstow upgrade [--check|--yes] Check for / install a newer envstow.
+//!   envstow scan-leak               PostToolUse hook: block tool output containing a live value.
 //!   envstow init                    Generate an identity, add self as recipient, create store.
 //!   envstow pubkey                  Print your age public key (share it to be added).
 //!   envstow add-recipient <age1..>  Add a recipient and re-encrypt the store.
@@ -37,6 +38,7 @@ mod cli;
 mod crypto;
 mod error;
 mod layout;
+mod leakscan;
 mod secrets;
 mod selfupdate;
 mod session;
@@ -94,6 +96,7 @@ fn main() {
         Some("pubkey") => cmd_pubkey(),
         Some("unlock") => session::cmd_unlock(&args[1..]),
         Some("refresh") => session::cmd_refresh(&args[1..]),
+        Some("scan-leak") => leakscan::cmd_scan_leak(&args[1..]),
         // `upgrade` is the canonical name (deno upgrade, rustup self update): "upgrade" means
         // the program itself, while "update" tends to mean the things a program manages (npm
         // update, brew upgrade, rustup update). envstow manages secrets, so `update` is kept
@@ -898,6 +901,7 @@ fn print_help() {
          \x20 envstow profile [create <name>]  Show the current profile, or create a new one.\n\
          \x20 envstow profiles                 List available profiles.\n\
          \x20 envstow upgrade [--check|--yes]  Upgrade envstow to the latest release.\n\
+         \x20 envstow scan-leak                Hook: block tool output that leaks a value (see GUARDRAILS.md).\n\
          \n\
          Profiles: add `--profile <name>` to any command to use a separate secret set\n\
          (e.g. dev/staging/prod), or set $ENVSTOW_PROFILE. Default is `default`.\n\

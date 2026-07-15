@@ -2,6 +2,29 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.19
+
+### Added
+- **`envstow scan-leak` — the output guard, now built into the binary.** The mechanical
+  leak-blocking hook used to be a hand-copied bash+python script (`scripts/redact-guard.sh`) that
+  went stale the moment its detection was improved and couldn't be updated centrally. Its logic now
+  lives in the binary as `envstow scan-leak`: wire it as a Claude Code (or Cursor/…) `PostToolUse`
+  hook with **one line** — `"command": "envstow scan-leak"` — and `envstow upgrade` keeps the
+  detection current. No script to copy, no `python3`, no config envstow writes for you.
+
+  Behavior is identical to the hardened script: it reads the tool-result payload on stdin, exits
+  `2` (block) if the output contains a live secret value or `0` (allow) otherwise, keys off
+  `ENVSTOW_LOADED` so it catches non-conventionally-named secrets (`DATABASE_URL`, DSNs), matches
+  multi-line values line by line and base64 copies, and applies the length+entropy distinctiveness
+  gate. It never prints a value — only the offending variable name. Run by hand at a terminal it
+  prints a one-line explainer instead of hanging on stdin. The JSON payload is parsed by a small
+  built-in extractor (no `serde` dependency), failing open on anything unparseable.
+
+### Deprecated
+- **`scripts/redact-guard.sh`** — superseded by `envstow scan-leak`. It still works and behaves
+  identically, but it doesn't auto-update and needs `python3`. Point your hook at `envstow
+  scan-leak` and delete the script. See GUARDRAILS.md.
+
 ## 0.1.18
 
 ### Added

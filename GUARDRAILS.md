@@ -98,15 +98,14 @@ scans the command's output for any **live secret value** and blocks the result f
 agent if one is found. It compares against the actual values in the environment (and their
 base64 form), so it catches real leaks — not just patterns.
 
-The guard script is in this repo at
-[`scripts/redact-guard.sh`](./scripts/redact-guard.sh). It reads the tool-result payload on
-stdin and exits non-zero (blocking) if the output contains a live secret value.
+**The guard is built into the binary: `envstow scan-leak`.** It reads the tool-result payload on
+stdin and exits non-zero (blocking) if the output contains a live secret value. Because it ships
+in the binary, `envstow upgrade` keeps the detection current — there is no script to copy or keep
+in sync. envstow never writes to your agent's config; you add one hook line yourself (below).
 
 ### Claude Code
 
-1. Copy `scripts/redact-guard.sh` into your repo (e.g. `scripts/redact-guard.sh`), keep it
-   executable (`chmod +x`).
-2. Add the hook to `.claude/settings.json` (merge with any existing config):
+Add the hook to `.claude/settings.json` (merge with any existing config) — no file to copy:
 
 ```json
 {
@@ -115,7 +114,7 @@ stdin and exits non-zero (blocking) if the output contains a live secret value.
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/scripts/redact-guard.sh" }
+          { "type": "command", "command": "envstow scan-leak" }
         ]
       }
     ]
@@ -123,18 +122,27 @@ stdin and exits non-zero (blocking) if the output contains a live secret value.
 }
 ```
 
+That's the whole setup. `scan-leak` reads the payload on stdin, exits `0` to allow or `2` to block,
+and on a block prints a one-line reason to stderr — naming the offending variable, never its value.
+
 ### Cursor
 
-Wire the same script into an `afterShellExecution` hook in your Cursor hooks config (Cursor
-also offers `beforeShellExecution` to block *before* a risky command runs). The script's
-contract is identical: read the tool result on stdin, exit non-zero to block.
+Wire `envstow scan-leak` into an `afterShellExecution` hook in your Cursor hooks config (Cursor
+also offers `beforeShellExecution` to block *before* a risky command runs). The contract is
+identical: read the tool result on stdin, exit non-zero to block.
 
 ### Windsurf / Aider / other agents
 
-Any agent with a post-command / post-tool hook can run the same script — the mechanism is the
-same everywhere (*"intercept tool output, block on policy"*). Point that agent's hook at
-`redact-guard.sh`. If an agent has no hook system, you rely on Layers 1–2 plus the model's own
-judgment.
+Any agent with a post-command / post-tool hook can run `envstow scan-leak` — the mechanism is the
+same everywhere (*"intercept tool output, block on policy"*). If an agent has no hook system, you
+rely on Layers 1–2 plus the model's own judgment.
+
+### Legacy: `scripts/redact-guard.sh`
+
+Earlier versions shipped this as a hand-copied bash script. It still works and its behavior is
+identical, but it's **deprecated** — it doesn't auto-update, needs `python3`, and must be copied
+into each repo. Prefer `envstow scan-leak`. If you have the old hook wired, just point it at
+`envstow scan-leak` and delete the script.
 
 > **Known limits (be honest):** the guard catches a value verbatim or base64-encoded. Other
 > encodings (hex, gzip, url-encoding) or a value split across commands can still evade it. It is

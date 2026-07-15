@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# envstow PostToolUse guard.
+# envstow PostToolUse guard — DEPRECATED.
+#
+# This hand-copied script is superseded by the built-in `envstow scan-leak`, which has identical
+# behavior but ships in the binary (so `envstow upgrade` keeps it current) and needs no python3.
+# Point your PostToolUse hook at `envstow scan-leak` instead — see GUARDRAILS.md. Kept working so
+# existing setups don't break.
 #
 # Reads the Claude Code PostToolUse payload on stdin and blocks the tool result
 # from reaching the model's context if it contains any CURRENT secret value.

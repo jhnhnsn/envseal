@@ -461,11 +461,13 @@ Three optional defense layers back this up — set them up in **your** repo by f
   reference by name and never echo/print/log a value.
 - **Denylist** — deny `env`, `printenv`, `echo $*`, `set`, … (Claude Code `settings.json`, or
   Cursor's `beforeShellExecution` hook).
-- **Output guard** — a post-command hook (`scripts/redact-guard.sh`) that blocks any command
-  output containing a live secret value (raw or base64), regardless of the agent's judgment. It
-  keys off `ENVSTOW_LOADED` (the exact names `unlock` set), so it catches **any** secret —
-  `DATABASE_URL`, a DSN, a connection string — not just conventionally-named ones, and matches
-  multi-line values line by line.
+- **Output guard** — a post-command hook (`envstow scan-leak`, built into the binary) that blocks
+  any command output containing a live secret value (raw or base64), regardless of the agent's
+  judgment. It keys off `ENVSTOW_LOADED` (the exact names `unlock` set), so it catches **any**
+  secret — `DATABASE_URL`, a DSN, a connection string — not just conventionally-named ones, and
+  matches multi-line values line by line. One line in your agent's config wires it up; `envstow
+  upgrade` keeps it current. (The old hand-copied `scripts/redact-guard.sh` still works but is
+  deprecated.)
 
 > Defense-in-depth, **not** a vault. It makes accidental exposure very unlikely. A human or
 > agent who deliberately runs `--show` will see the value — that's by design (you own the
