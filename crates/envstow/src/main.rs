@@ -466,6 +466,7 @@ fn cmd_set(args: &[String]) -> i32 {
     let code = write_secrets(&paths.recipients, &paths.store, &mut vars);
     if code == 0 {
         eprintln!("✔  set {name} ({preview})");
+        nudge_if_unlocked_shell();
     }
     code
 }
@@ -624,6 +625,7 @@ fn cmd_delete(args: &[String]) -> i32 {
              \x20   store's git history by anyone who is (or was) a recipient. Rotate it at the\n\
              \x20   source if it should no longer be valid."
         );
+        nudge_if_unlocked_shell();
     }
     code
 }
@@ -800,6 +802,7 @@ fn cmd_edit(args: &[String]) -> i32 {
     shred_and_remove(&tmp);
     if code == 0 {
         eprintln!("✔  store updated.");
+        nudge_if_unlocked_shell();
     }
     code
 }
@@ -926,6 +929,21 @@ fn warn_on_shadowed(vars: &[(String, String)]) {
          inside:\n\
          \x20  {}",
         shadowed.join(", ")
+    );
+}
+
+/// After a `set`/`delete`/`edit` that changed the store, nudge the user IF they ran it from
+/// inside an `envstow unlock` shell — that shell holds a copy of the OLD values (a running
+/// process's environment can't be changed from outside), so it's now stale. The fix is uniform
+/// for every kind of change: exit and unlock again. stderr only; never alters stdout or the exit
+/// code. Silent outside an unlocked shell, where there's no stale state to warn about.
+fn nudge_if_unlocked_shell() {
+    if env::var_os("ENVSTOW_UNLOCKED").is_none() {
+        return;
+    }
+    eprintln!(
+        "\nℹ️  envstow: you're in an unlocked shell — it still holds the previous values.\n\
+         \x20  Run `exit` then `envstow unlock` to pick up this change."
     );
 }
 

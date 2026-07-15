@@ -1030,6 +1030,61 @@ fn a_newer_format_store_is_refused_with_an_upgrade_hint() {
 }
 
 #[test]
+fn set_delete_edit_nudge_only_inside_an_unlocked_shell() {
+    let repo = Repo::new("nudge");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+
+    // Outside an unlocked shell: no nudge on any of the three.
+    let s = repo.run(&["set", "TOK"], "value1");
+    assert!(
+        !s.stderr.contains("unlocked shell"),
+        "set outside unlock must not nudge: {}",
+        s.stderr
+    );
+
+    // Inside an unlocked shell (ENVSTOW_UNLOCKED=1): each mutation nudges to exit + unlock.
+    let s2 = repo.run_env(&["set", "TOK"], "value2", "ENVSTOW_UNLOCKED", "1");
+    assert!(
+        s2.stderr.contains("unlocked shell") && s2.stderr.contains("envstow unlock"),
+        "set inside unlock should nudge: {}",
+        s2.stderr
+    );
+    // The nudge is advisory: stderr only, never stdout, exit unchanged.
+    assert_eq!(s2.code, 0);
+    assert!(
+        !s2.stdout.contains("unlocked shell"),
+        "nudge must not touch stdout: {:?}",
+        s2.stdout
+    );
+
+    let d = repo.run_env(&["delete", "TOK", "--force"], "", "ENVSTOW_UNLOCKED", "1");
+    assert!(
+        d.stderr.contains("unlocked shell"),
+        "delete inside unlock should nudge: {}",
+        d.stderr
+    );
+
+    // edit inside an unlock: use the fake editor that appends a line, and set ENVSTOW_UNLOCKED.
+    let editor = write_fake_editor(&repo.dir);
+    let mut cmd = Command::new(BIN);
+    cmd.args(["edit"])
+        .current_dir(&repo.dir)
+        .env("ENVSTOW_IDENTITY", &repo.identity)
+        .env("EDITOR", editor.to_str().unwrap())
+        .env("ENVSTOW_UNLOCKED", "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    clear_agent_markers(&mut cmd);
+    let out = cmd.output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("unlocked shell"),
+        "edit inside unlock should nudge: {err}"
+    );
+}
+
+#[test]
 fn delete_removes_only_the_named_secret() {
     let repo = Repo::new("delete");
     assert_eq!(repo.run(&["init"], "").code, 0);

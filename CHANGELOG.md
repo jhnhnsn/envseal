@@ -2,6 +2,21 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.18
+
+### Added
+- **`set`, `delete`, and `edit` now nudge you when you run them inside an unlocked shell.** That
+  shell holds a copy of the *old* values (a running process's environment can't be changed from
+  outside), so after changing the store you'd otherwise be working with stale secrets silently.
+  It prints a one-line reminder to `exit` and `envstow unlock` again:
+  ```
+  ℹ️  envstow: you're in an unlocked shell — it still holds the previous values.
+     Run `exit` then `envstow unlock` to pick up this change.
+  ```
+  Fires only when `ENVSTOW_UNLOCKED` is set (no noise outside an unlock), on stderr only (never
+  touches stdout or the exit code), and leaves the choice to restart with you rather than doing it
+  for you.
+
 ## 0.1.17
 
 ### Changed
