@@ -135,6 +135,51 @@ teaches Claude Code to use secrets by name — install it globally or per-repo (
 
 ---
 
+## Quickstart (you + a collaborator)
+
+The minimum to go from nothing to two people sharing a secret. Both of you install envstow first
+(above).
+
+**You — create the store, add a secret, commit it:**
+
+```bash
+cd my-project
+envstow init                                # your key + an empty store in .envstow/
+printf 'sk-proj-abc123' | envstow set OPENAI_API_KEY
+git add .envstow && git commit -m "Add secrets store" && git push
+```
+
+**Your collaborator — make a key and send you the public half.** They do this **outside the
+project** so they don't touch its `recipients` file:
+
+```bash
+cd ~                                        # anywhere but the project
+envstow init
+envstow pubkey                              # → age1abc…   they send you this (Slack/email is fine)
+```
+
+**You — add their key (this re-encrypts the store) and push:**
+
+```bash
+cd my-project
+envstow add-recipient age1abc… alice
+git add .envstow && git commit -m "Add alice" && git push
+```
+
+**Your collaborator — pull, and they're in:**
+
+```bash
+git pull
+envstow list                                # sees the names
+envstow unlock -- your-app                  # runs it with the secrets set, values by name
+```
+
+That's the whole loop. The public key is safe to share; the value never leaves an encrypted store
+or a child process. Full walkthrough and the reasoning behind each step:
+**[ONBOARDING.md](./ONBOARDING.md)**.
+
+---
+
 ## Usage scenarios
 
 Secrets are always referenced by **name**; the plaintext only ever lives inside the child
