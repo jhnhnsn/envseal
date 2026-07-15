@@ -1,0 +1,38 @@
+name: prune-releases
+
+# Policy: keep only the most recent GitHub Release. Older releases' built artifacts are deleted,
+# but their git TAGS are kept, so any past version stays rebuildable from source
+# (`git checkout vX.Y.Z && cargo build --release`).
+#
+# This is a separate workflow (not part of the cargo-dist-generated release.yml) so it survives
+# `dist generate` without causing config drift.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write   # needed to delete releases
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all but the latest release (keep tags)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Newest first; keep index 0, delete the rest. --cleanup-tag is intentionally NOT used,
+          # so the git tags remain and every version stays rebuildable from source.
+          tags=$(gh release list --repo "$REPO" --limit 100 --json tagName,createdAt \
+                   --jq 'sort_by(.createdAt) | reverse | .[1:] | .[].tagName')
+          if [ -z "$tags" ]; then
+            echo "Only one release present — nothing to prune."
+            exit 0
+          fi
+          for tag in $tags; do
+            echo "Deleting old release (keeping tag): $tag"
+            gh release delete "$tag" --repo "$REPO" --yes
+          done
