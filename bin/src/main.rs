@@ -1084,8 +1084,12 @@ fn cmd_refresh(args: &[String]) -> i32 {
 // update
 // ---------------------------------------------------------------------------
 
-/// The published installer, i.e. the command the README tells you to run. `update` re-runs it so
-/// you don't have to remember it — that IS the feature.
+/// The published shell installer, i.e. the command the README tells you to run. `upgrade` re-runs
+/// it so you don't have to remember it — that IS the feature.
+///
+/// POSIX-only: Windows installs via the PowerShell installer and takes a different branch in
+/// `cmd_upgrade`, so this would be dead code there (and `-D warnings` in CI rightly fails on it).
+#[cfg(not(windows))]
 const INSTALLER_URL: &str =
     "https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.sh";
 
@@ -1267,14 +1271,15 @@ fn cmd_upgrade(args: &[String]) -> i32 {
         }
     }
 
-    // Windows installs via the PowerShell installer; there's no `sh` to pipe through.
+    // Windows installs via the PowerShell installer; there's no `sh` to pipe through, so we print
+    // the command instead of running it. (Both arms are the tail of the fn, so no `return`.)
     #[cfg(windows)]
     {
         eprintln!(
-            "\nenvstow: run the PowerShell installer to update:\n\
+            "\nenvstow: run the PowerShell installer to upgrade:\n\
              \x20  powershell -c \"irm https://github.com/jhnhnsn/envstow/releases/latest/download/envstow-installer.ps1 | iex\""
         );
-        return 0;
+        0
     }
 
     #[cfg(not(windows))]

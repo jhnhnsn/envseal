@@ -423,6 +423,17 @@ cd bin && cargo test         # unit + integration: crypto round-trip, masking, f
 scripts/test-redact-guard.sh # proves the hook blocks a leak and allows name references
 ```
 
+**Before pushing, check the Windows target too.** CI runs `clippy -D warnings` on all three OSes,
+and `#[cfg]`-gated code that's fine on your machine can be dead code (or a lint) on Windows — a
+host-only clippy run won't catch it:
+
+```bash
+rustup target add x86_64-pc-windows-msvc              # once
+cargo clippy --all-targets --target x86_64-pc-windows-msvc -- -D warnings
+```
+
+No MSVC toolchain is needed — `clippy`/`check` don't link, so this works from macOS or Linux.
+
 CI (`.github/workflows/ci.yml`) builds + tests + `fmt` + `clippy` on macOS/Linux/Windows, and
 runs `shellcheck` + the redact-guard test on Linux.
 
