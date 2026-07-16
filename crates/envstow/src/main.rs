@@ -8,6 +8,7 @@
 //!   envstow delete <NAME>           Remove one secret and re-encrypt (then rotate!).
 //!   envstow unlock [-- <cmd>...]    Spawn a subshell / run a command with the whole env set.
 //!   envstow refresh                 Emit `unset` lines for secrets that left the store (eval it).
+//!   envstow status                  Show unlock state, profile, and loaded secret NAMES.
 //!   envstow upgrade [--check|--yes] Check for / install a newer envstow.
 //!   envstow scan-leak               PostToolUse hook: block tool output containing a live value.
 //!   envstow init                    Generate an identity, add self as recipient, create store.
@@ -96,6 +97,7 @@ fn main() {
         Some("pubkey") => cmd_pubkey(),
         Some("unlock") => session::cmd_unlock(&args[1..]),
         Some("refresh") => session::cmd_refresh(&args[1..]),
+        Some("status") => session::cmd_status(&args[1..]),
         Some("scan-leak") => leakscan::cmd_scan_leak(&args[1..]),
         // `upgrade` is the canonical name (deno upgrade, rustup self update): "upgrade" means
         // the program itself, while "update" tends to mean the things a program manages (npm
@@ -894,6 +896,7 @@ fn print_help() {
          \x20 envstow pubkey                   Print your age PUBLIC key (share it to be added).\n\
          \x20 envstow unlock [-- <cmd>...]     Subshell / run a command with the whole env set.\n\
          \x20 envstow refresh                  Unset secrets that left the store: eval \"$(envstow refresh)\".\n\
+         \x20 envstow status                   Show whether you're unlocked, the profile, and secret NAMES.\n\
          \x20 envstow init [--no-skill]        Create identity + recipients + store; add agent skill.\n\
          \x20 envstow add-recipient <age1..>   Add a collaborator and re-encrypt.\n\
          \x20 envstow remove-recipient <k|nm>  Remove a collaborator and re-encrypt (then rotate).\n\

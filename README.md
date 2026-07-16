@@ -405,6 +405,7 @@ env var > `default`. Using a profile that doesn't exist errors and tells you to
 | `envstow list` | List secret **names** (never values). |
 | `envstow pubkey` | Print your age **public** key, to share so a member can add you. |
 | `envstow unlock [-- <cmd>]` | Run a command (or subshell) with every secret set as an env var. |
+| `envstow status` | Show whether you're in an unlocked shell, which profile, and the loaded secret **names** (never values; reads only env markers). |
 | `eval "$(envstow refresh)"` | Optional: unset *deleted* names an unlocked shell still holds, without restarting it (emits only `unset`). For any store change, `exit` + `envstow unlock` is the simple rule — see [Stale secrets](#stale-secrets-in-an-unlocked-shell). |
 | `envstow add-recipient <age1…> [label]` | Add a collaborator **and** re-encrypt — both steps. |
 | `envstow remove-recipient <key\|label>` | Remove a collaborator; re-encrypt (then **rotate**). |

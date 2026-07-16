@@ -2,6 +2,20 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.20
+
+### Added
+- **`envstow status`** — a one-glance check of your unlock state. It reports whether you're inside
+  an `envstow unlock` shell, which **profile** it holds, and the secret **names** loaded in it:
+  ```
+  🔓 unlocked — profile: prod
+     secrets loaded (2): DB_URL, API_KEY
+  ```
+  (or `🔒 locked` outside one). It reads only the env markers `unlock` set — no store is decrypted,
+  no identity touched, and only names are printed, never values — so it's safe anywhere, including
+  under an agent. It reports what envstow put in *this* shell; it can't see shell nesting depth
+  (that's a shell fact, not envstow's).
+
 ## 0.1.19
 
 ### Added

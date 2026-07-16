@@ -65,10 +65,12 @@ value yourself.
 
 ```bash
 envstow list          # prints the NAMES of stored secrets (never values) — safe
+envstow status        # are you in an unlocked shell? which profile? which names are live? — safe
 ```
 
-Use this to learn which names exist before referencing them. If you're unsure a secret exists,
-`list` first.
+Use `list` to learn which names exist before referencing them. Use `status` to check whether the
+current shell already has the secrets loaded (so you can reference them directly) or whether you
+need `envstow unlock`. Both print names only, never values.
 
 ## Reading a value
 

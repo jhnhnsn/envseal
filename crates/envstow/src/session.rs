@@ -137,6 +137,37 @@ fn loaded_names() -> Vec<String> {
         .collect()
 }
 
+/// `envstow status` — report whether this shell is unlocked, which profile it holds, and the
+/// secret NAMES that are live in it.
+///
+/// It reads only the env markers `unlock` set (`ENVSTOW_UNLOCKED`, `ENVSTOW_PROFILE`,
+/// `ENVSTOW_LOADED`) — no store is decrypted, no identity is touched, and only names are printed,
+/// never values. So it's safe to run anywhere, including under an agent. It reports exactly what
+/// envstow put in *this* shell; it can't see shell nesting depth (that's a shell fact, not ours).
+pub fn cmd_status(args: &[String]) -> crate::Cmd {
+    if let Some(a) = args.first() {
+        return Err(AppError::usage(format!("unexpected argument '{a}'")));
+    }
+
+    if env::var_os("ENVSTOW_UNLOCKED").is_none() {
+        println!("🔒 locked — not inside an `envstow unlock` shell.");
+        return Ok(());
+    }
+
+    let profile = env::var("ENVSTOW_PROFILE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| crate::layout::DEFAULT_PROFILE.to_string());
+    let names = loaded_names();
+    println!("🔓 unlocked — profile: {profile}");
+    if names.is_empty() {
+        println!("   secrets loaded: (none)");
+    } else {
+        println!("   secrets loaded ({}): {}", names.len(), names.join(", "));
+    }
+    Ok(())
+}
+
 /// `envstow refresh` — emit shell code to unset secrets this environment has but the store no
 /// longer does. Meant to be evaluated by your shell: `eval "$(envstow refresh)"`.
 ///

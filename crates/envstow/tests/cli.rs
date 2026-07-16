@@ -814,6 +814,72 @@ fn scan_leak_catches_non_conventional_and_multiline_and_ignores_low_entropy() {
 }
 
 #[test]
+fn status_reports_locked_unlocked_profile_and_names() {
+    use std::process::Stdio;
+    let run = |envs: &[(&str, &str)]| -> Output {
+        let mut cmd = Command::new(BIN);
+        cmd.args(["status"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        clear_agent_markers(&mut cmd);
+        // Start from a clean slate for the markers status reads.
+        for k in ["ENVSTOW_UNLOCKED", "ENVSTOW_PROFILE", "ENVSTOW_LOADED"] {
+            cmd.env_remove(k);
+        }
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        let out = cmd.output().unwrap();
+        Output {
+            code: out.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        }
+    };
+
+    // Outside an unlock: locked.
+    let locked = run(&[]);
+    assert_eq!(locked.code, 0);
+    assert!(
+        locked.stdout.contains("locked"),
+        "should report locked: {}",
+        locked.stdout
+    );
+    assert!(
+        !locked.stdout.contains("unlocked"),
+        "not unlocked: {}",
+        locked.stdout
+    );
+
+    // Unlocked with a profile and loaded names: reports both, names only.
+    let unlocked = run(&[
+        ("ENVSTOW_UNLOCKED", "1"),
+        ("ENVSTOW_PROFILE", "prod"),
+        ("ENVSTOW_LOADED", "DB_URL,API_KEY"),
+    ]);
+    assert_eq!(unlocked.code, 0);
+    assert!(unlocked.stdout.contains("unlocked"), "{}", unlocked.stdout);
+    assert!(
+        unlocked.stdout.contains("prod"),
+        "profile: {}",
+        unlocked.stdout
+    );
+    assert!(
+        unlocked.stdout.contains("DB_URL") && unlocked.stdout.contains("API_KEY"),
+        "names: {}",
+        unlocked.stdout
+    );
+
+    // Unlocked, no explicit profile -> default.
+    let dflt = run(&[("ENVSTOW_UNLOCKED", "1"), ("ENVSTOW_LOADED", "X")]);
+    assert!(
+        dflt.stdout.contains("default"),
+        "default profile: {}",
+        dflt.stdout
+    );
+}
+
+#[test]
 fn scan_leak_rejects_arguments() {
     // It reads stdin; a positional arg is a usage error (exit 2, names the mistake).
     let mut cmd = Command::new(BIN);
