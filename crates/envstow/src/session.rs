@@ -42,6 +42,127 @@ pub fn cmd_unlock(args: &[String]) -> crate::Cmd {
     spawn_with_env(&cmd, secrets)
 }
 
+/// `envstow run [--only NAME[,NAME...]]... [--] <cmd>...` — run ONE command with secrets in its
+/// env: all of them by default, or exactly the named ones with `--only` (least privilege — an
+/// `npm install`'s postinstall scripts get the deploy token they need, not the whole store).
+///
+/// `run` is the one-shot verb; `unlock` remains the interactive-subshell verb (and keeps its
+/// `unlock -- <cmd>` form for compatibility). `--only` takes a comma list, repeats, or both.
+/// An unknown name is a HARD error before anything spawns — launching the child with a silently
+/// missing variable would fail later and further from the cause. `ENVSTOW_LOADED` reflects the
+/// scoped set, so `status` and the leak guard see exactly what's live.
+pub fn cmd_run(args: &[String]) -> crate::Cmd {
+    let (profile, args) = resolve_profile(args)?;
+
+    // Leading `run` flags end at `--` or the first non-flag token; everything from there is the
+    // command, so its own flags (`flyctl deploy --verbose`) pass through untouched.
+    let mut only: Vec<String> = Vec::new();
+    let mut cmd: &[String] = &[];
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "--" {
+            cmd = &args[i + 1..];
+            break;
+        } else if a == "--only" {
+            let Some(v) = args.get(i + 1) else {
+                return Err(AppError::usage("--only requires a NAME (or NAME,NAME,...)"));
+            };
+            push_only_names(&mut only, v)?;
+            i += 2;
+        } else if let Some(v) = a.strip_prefix("--only=") {
+            push_only_names(&mut only, v)?;
+            i += 1;
+        } else if a.starts_with('-') {
+            return Err(AppError::usage(format!(
+                "unknown flag '{a}' (flags for your command go after `--`)"
+            )));
+        } else {
+            cmd = &args[i..];
+            break;
+        }
+    }
+    if cmd.is_empty() {
+        return Err(AppError::usage(
+            "usage: envstow run [--only NAME[,NAME...]]... [--] <cmd>...\n\
+             \x20  (for an interactive subshell, use `envstow unlock`)",
+        ));
+    }
+
+    let mut secrets = load_secrets(&profile)?;
+    if secrets.is_empty() {
+        return Err(AppError::msg("store decrypted but contains no variables."));
+    }
+
+    if !only.is_empty() {
+        // Every requested name must exist — refuse BEFORE spawning rather than launch a child
+        // missing a variable it needs. A near-miss gets a suggestion.
+        for n in &only {
+            if !secrets.contains(n) {
+                return Err(AppError::msg(match closest_name(n, secrets.names()) {
+                    Some(s) => format!("unknown secret '{n}' (did you mean {s}?)"),
+                    None => format!("unknown secret '{n}' — `envstow list` shows the names."),
+                }));
+            }
+        }
+        secrets.retain_only(&only);
+    }
+
+    let names: Vec<&str> = secrets.names().collect();
+    eprintln!(
+        "🔓 envstow: loaded {} secret(s) from {}: {}",
+        names.len(),
+        profile,
+        names.join(", ")
+    );
+    warn_on_shadowed(&secrets);
+
+    spawn_with_env(cmd, secrets)
+}
+
+/// Split an `--only` value on commas into `out`, deduping (first occurrence wins). An empty
+/// segment (`--only A,,B` or `--only ""`) is a usage error, not a silent skip.
+fn push_only_names(out: &mut Vec<String>, value: &str) -> Result<(), AppError> {
+    for n in value.split(',') {
+        if n.is_empty() {
+            return Err(AppError::usage(format!(
+                "--only got an empty name in '{value}'"
+            )));
+        }
+        if !out.iter().any(|have| have == n) {
+            out.push(n.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// The store name closest to `target`, if it's plausibly a typo (edit distance ≤ 2,
+/// case-insensitive — so `fly_api_token` and `SENTRY_DNS` both find their intended name).
+fn closest_name<'a>(target: &str, names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let t = target.to_ascii_lowercase();
+    names
+        .map(|n| (edit_distance(&t, &n.to_ascii_lowercase()), n))
+        .filter(|(d, _)| *d <= 2)
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, n)| n)
+}
+
+/// Plain Levenshtein distance, two-row DP. Inputs are short (variable names); O(a·b) is fine.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let sub = prev[j] + usize::from(ca != cb);
+            cur.push(sub.min(prev[j + 1] + 1).min(cur[j] + 1));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
 /// Warn about secrets whose names are ALREADY set in our environment with a different value —
 /// the child will see ours, shadowing whatever was there.
 ///
@@ -552,6 +673,36 @@ mod tests {
                 "{bad:?} must NOT be treated as a safe identifier"
             );
         }
+    }
+
+    #[test]
+    fn closest_name_suggests_typos_but_not_strangers() {
+        let names = ["FLY_API_TOKEN", "SENTRY_DSN", "DB_URL"];
+        // Transposition, wrong case, one char off — all plausibly the same name.
+        assert_eq!(
+            closest_name("SENTRY_DNS", names.into_iter()),
+            Some("SENTRY_DSN")
+        );
+        assert_eq!(
+            closest_name("fly_api_token", names.into_iter()),
+            Some("FLY_API_TOKEN")
+        );
+        assert_eq!(closest_name("DB_URI", names.into_iter()), Some("DB_URL"));
+        // Distance > 2 must NOT suggest — a wrong guess is worse than none.
+        assert_eq!(closest_name("GITHUB_PAT", names.into_iter()), None);
+    }
+
+    #[test]
+    fn only_names_split_dedupe_and_reject_empties() {
+        let mut out = Vec::new();
+        push_only_names(&mut out, "A,B").unwrap();
+        push_only_names(&mut out, "B,C").unwrap(); // repeat flag: B deduped
+        assert_eq!(out, ["A", "B", "C"]);
+        assert!(
+            push_only_names(&mut Vec::new(), "A,,B").is_err(),
+            "empty segment"
+        );
+        assert!(push_only_names(&mut Vec::new(), "").is_err(), "empty value");
     }
 
     #[test]

@@ -266,16 +266,29 @@ see [Multi-line secrets](#multi-line-secrets) below.
 
 ### 3. Run something that needs secrets
 
-`envstow unlock -- <cmd>` runs one command with every secret set as an env var:
+`envstow run -- <cmd>` runs one command with every secret set as an env var:
 
 ```bash
-envstow unlock -- npm run build
-envstow unlock -- flyctl deploy
-envstow unlock -- sh -c 'psql "$DATABASE_URL" -f migrate.sql'
+envstow run -- npm run build
+envstow run -- flyctl deploy
+envstow run -- sh -c 'psql "$DATABASE_URL" -f migrate.sql'
 ```
 
 You typed `$DATABASE_URL` — the shell expands it *inside the child*, so the value reaches `psql`
 but never your history or a log.
+
+**Give a command only what it needs** with `--only` (comma list, repeatable, or both):
+
+```bash
+envstow run --only FLY_API_TOKEN -- flyctl deploy
+envstow run --only DB_URL,SENTRY_DSN -- ./migrate.sh
+```
+
+That `npm run build` above? Its dependencies' postinstall scripts inherit the child's env — all
+of it. `--only` is least privilege for exactly that case: the command gets the named secrets and
+nothing else. A typo'd name is a **hard error before anything spawns** (`unknown secret
+'SENTRY_DNS' (did you mean SENTRY_DSN?)`) — never a child launched with a silently missing
+variable. (`envstow unlock -- <cmd>` still works as the same thing without scoping.)
 
 ### 4. Working with an AI agent
 
@@ -417,6 +430,7 @@ env var > `default`. Using a profile that doesn't exist errors and tells you to
 | `envstow list` | List secret **names** (never values). |
 | `envstow pubkey` | Print your age **public** key, to share so a member can add you. |
 | `envstow unlock [-- <cmd>]` | Run a command (or subshell) with every secret set as an env var. |
+| `envstow run [--only A,B] -- <cmd>` | Run one command with all — or `--only` the named — secrets. Unknown names error before spawning. |
 | `envstow status` | Show whether you're in an unlocked shell, which profile, and the loaded secret **names** (never values; reads only env markers). |
 | `eval "$(envstow env)"` | Load — or reset, after a store change — every secret in **this** shell, no subshell. Refuses under an agent and when stdout is a terminal; see [Stale secrets](#stale-secrets-in-an-unlocked-shell). |
 | `eval "$(envstow env --off)"` | Unset everything envstow set in this shell (names only — needs no key). |

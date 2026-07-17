@@ -2,6 +2,19 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.22
+
+### Added
+- **`envstow run [--only NAME[,NAME...]]... [--] <cmd>...`** — the one-shot verb, with least
+  privilege built in. Bare `run -- <cmd>` matches `unlock -- <cmd>` (which still works); `--only`
+  scopes the child's env to exactly the named secrets — so an `npm install`'s postinstall scripts
+  get the one token they need, not the whole store. `--only` accepts a comma list, repeated
+  flags, or both. An unknown name is a **hard error before anything spawns**, with a
+  did-you-mean suggestion (`unknown secret 'SENTRY_DNS' (did you mean SENTRY_DSN?)`) — never a
+  child launched with a silently missing variable. `ENVSTOW_LOADED` reflects the scoped set, so
+  `status` and `scan-leak` see exactly what's live. The agent skill now teaches `run --only` as
+  the preferred pattern.
+
 ## 0.1.21
 
 ### Added

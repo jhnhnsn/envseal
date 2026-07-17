@@ -7,6 +7,7 @@
 //!   envstow set <NAME> [--clipboard] Store a value from stdin, or the OS clipboard.
 //!   envstow delete <NAME>           Remove one secret and re-encrypt (then rotate!).
 //!   envstow unlock [-- <cmd>...]    Spawn a subshell / run a command with the whole env set.
+//!   envstow run [--only A,B] -- <c> Run one command with all — or only the named — secrets.
 //!   envstow env [--off]             Emit eval-able exports/unsets for the CURRENT shell (guarded).
 //!   envstow refresh                 Emit `unset` lines for secrets that left the store (eval it).
 //!   envstow shell-init              Print the optional shell wrapper to source from your rc.
@@ -104,6 +105,7 @@ fn main() {
         Some("list") => cmd_list(&args[1..]),
         Some("pubkey") => cmd_pubkey(),
         Some("unlock") => session::cmd_unlock(&args[1..]),
+        Some("run") => session::cmd_run(&args[1..]),
         Some("env") => session::cmd_env(&args[1..]),
         Some("refresh") => session::cmd_refresh(&args[1..]),
         Some("status") => session::cmd_status(&args[1..]),
@@ -851,6 +853,7 @@ fn print_help() {
          \x20 envstow list                     List secret NAMES (never values).\n\
          \x20 envstow pubkey                   Print your age PUBLIC key (share it to be added).\n\
          \x20 envstow unlock [-- <cmd>...]     Subshell / run a command with the whole env set.\n\
+         \x20 envstow run [--only A,B] -- <c>  Run one command with all — or only the named — secrets.\n\
          \x20 envstow env [--off]              Load (or --off: unset) secrets in THIS shell: eval \"$(envstow env)\".\n\
          \x20 envstow refresh                  Unset secrets that left the store: eval \"$(envstow refresh)\".\n\
          \x20 envstow status                   Show whether you're unlocked, the profile, and secret NAMES.\n\

@@ -1661,3 +1661,94 @@ fn env_off_unsets_names_without_needing_values() {
     );
     assert!(!agent.stdout.contains("secretval") && !agent.stderr.contains("secretval"));
 }
+
+// ---------------------------------------------------------------------------------------------
+// `run` — the one-shot verb, with `--only` least-privilege scoping
+// ---------------------------------------------------------------------------------------------
+
+#[cfg(unix)] // drives the child through `sh -c`, like the unlock/refresh tests
+#[test]
+fn run_only_scopes_the_env_to_the_named_secrets() {
+    let repo = Repo::new("runonly");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "WANTED_A"], "aval").code, 0);
+    assert_eq!(repo.run(&["set", "WANTED_B"], "bval").code, 0);
+    assert_eq!(repo.run(&["set", "EXCLUDED"], "secretval").code, 0);
+
+    // Comma list and repeated flag together; the child sees exactly the two named secrets,
+    // and ENVSTOW_LOADED reflects the scope (so status / the leak guard see the truth).
+    let out = repo.run(
+        &[
+            "run", "--only", "WANTED_A", "--only=WANTED_B", "--", "sh", "-c",
+            r#"printf 'A=%s B=%s EXCL=%s LOADED=%s' "$WANTED_A" "$WANTED_B" "${EXCLUDED:-unset}" "$ENVSTOW_LOADED""#,
+        ],
+        "",
+    );
+    assert_eq!(out.code, 0, "run failed: {}", out.stderr);
+    assert_eq!(
+        out.stdout, "A=aval B=bval EXCL=unset LOADED=WANTED_A,WANTED_B",
+        "scope must be exactly the named secrets: {:?} / {}",
+        out.stdout, out.stderr
+    );
+    assert!(
+        !out.stderr.contains("EXCLUDED"),
+        "the loaded-names banner must not name unscoped secrets: {}",
+        out.stderr
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn run_without_only_matches_unlock_dashdash() {
+    let repo = Repo::new("runall");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "TOK"], "tokval").code, 0);
+
+    // `--` is optional: the first non-flag token starts the command.
+    let out = repo.run(&["run", "sh", "-c", r#"printf '%s' "$TOK""#], "");
+    assert_eq!(out.code, 0, "run failed: {}", out.stderr);
+    assert_eq!(out.stdout, "tokval");
+}
+
+#[test]
+fn run_rejects_unknown_names_before_spawning() {
+    let repo = Repo::new("runtypo");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "SENTRY_DSN"], "dsnval").code, 0);
+
+    // A typo'd name must refuse with a suggestion, and the command must never run.
+    let out = repo.run(
+        &["run", "--only", "SENTRY_DNS", "--", "sh", "-c", "echo RAN"],
+        "",
+    );
+    assert_ne!(out.code, 0, "unknown name must be a hard error");
+    assert!(
+        out.stderr.contains("SENTRY_DNS") && out.stderr.contains("did you mean SENTRY_DSN"),
+        "should name the miss and suggest the fix: {}",
+        out.stderr
+    );
+    assert!(
+        !out.stdout.contains("RAN"),
+        "child must not spawn on a bad --only: {:?}",
+        out.stdout
+    );
+}
+
+#[test]
+fn run_requires_a_command() {
+    let repo = Repo::new("runbare");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    let out = repo.run(&["run"], "");
+    assert_ne!(out.code, 0);
+    assert!(
+        out.stderr.contains("usage") && out.stderr.contains("unlock"),
+        "bare run should show usage and point subshell-seekers at unlock: {}",
+        out.stderr
+    );
+
+    let flags_only = repo.run(&["run", "--only", "X"], "");
+    assert_ne!(
+        flags_only.code, 0,
+        "flags without a command are not a command"
+    );
+}

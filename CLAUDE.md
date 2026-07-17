@@ -11,9 +11,13 @@ install or invoke.
 - Refer to secrets by their variable **name** only (e.g. `$FLY_API_TOKEN`). Never paste,
   echo, print, `cat`, or log a secret **value**.
 - To use a secret in a command, reference it by name inside an unlocked context:
-  - `envstow unlock -- <cmd>` runs `<cmd>` with every secret set as an env var, so
-    `envstow unlock -- sh -c 'deploy --token "$FLY_API_TOKEN"'` works and the value is only
-    ever in the child's environment — never in your tool call or its output.
+  - **Prefer** `envstow run --only <NAMES> -- <cmd>`: it runs `<cmd>` with exactly the named
+    secrets set as env vars, so
+    `envstow run --only FLY_API_TOKEN -- sh -c 'deploy --token "$FLY_API_TOKEN"'` works and the
+    value is only ever in the child's environment — never in your tool call or its output — and
+    the child gets nothing it doesn't need.
+  - `envstow run -- <cmd>` / `envstow unlock -- <cmd>` do the same with the whole store; use
+    them only when the command genuinely needs many secrets.
   - `$(envstow get NAME)` resolves one secret by name. **Under an agent, `envstow get`
     masks its output by default** (prints `••••••••`) precisely so a value can't land in your
     context. That masking is working as intended — do not try to defeat it. If a human needs
@@ -30,6 +34,9 @@ install or invoke.
 
 - `envstow get <NAME>` — resolve one secret by name (masked under an agent; `--show` to reveal).
 - `envstow unlock [-- <cmd>]` — run a command (or a subshell) with all secrets set as env vars.
+- `envstow run [--only NAME[,NAME...]] -- <cmd>` — run one command with all, or only the named,
+  secrets. **Prefer `run --only` with just the names the command needs** — least privilege for
+  the child and everything it spawns.
 - `envstow set <NAME> [--clipboard]` — store a value read from **stdin**, or the OS clipboard
   with `--clipboard`. Both keep the value off the command line.
 - `envstow delete <NAME>` — remove one secret and re-encrypt (`--force` to skip the prompt).

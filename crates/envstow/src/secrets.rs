@@ -65,6 +65,19 @@ impl Secrets {
         }
     }
 
+    /// Keep only the named secrets (store order preserved), zeroizing every value dropped.
+    /// Callers validate `names` against the store BEFORE scoping — this just applies the scope.
+    pub fn retain_only(&mut self, names: &[String]) {
+        self.vars.retain_mut(|(k, v)| {
+            if names.iter().any(|n| n == k) {
+                true
+            } else {
+                v.zeroize();
+                false
+            }
+        });
+    }
+
     /// Remove `name`, zeroizing its value as it leaves. Returns whether it was present.
     pub fn remove(&mut self, name: &str) -> bool {
         if let Some(i) = self.vars.iter().position(|(k, _)| k == name) {
@@ -100,6 +113,19 @@ mod tests {
         assert_eq!(s.names().count(), 2, "replace must not add a second entry");
         // Order preserved: A stays first.
         assert_eq!(s.names().collect::<Vec<_>>(), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn retain_only_scopes_in_store_order() {
+        let mut s = Secrets::from_pairs(vec![
+            ("A".into(), "1".into()),
+            ("B".into(), "2".into()),
+            ("C".into(), "3".into()),
+        ]);
+        // Request order must not matter; store order is what survives.
+        s.retain_only(&["C".into(), "A".into()]);
+        assert_eq!(s.names().collect::<Vec<_>>(), vec!["A", "C"]);
+        assert!(!s.contains("B"));
     }
 
     #[test]

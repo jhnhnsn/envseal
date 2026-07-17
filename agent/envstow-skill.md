@@ -17,8 +17,8 @@ a plain `.env` or another secrets tool.
 ## The one rule
 
 **Never print, echo, log, or paste a secret's value.** Reference it by variable name (e.g.
-`$FLY_API_TOKEN`). If you need a secret in a command, use `envstow unlock -- <cmd>` (below) so
-the value only ever lives in the child process — never in your transcript.
+`$FLY_API_TOKEN`). If you need a secret in a command, use `envstow run --only <NAMES> -- <cmd>`
+(below) so the value only ever lives in the child process — never in your transcript.
 
 ## Subtle ways a value leaks (guard against these yourself)
 
@@ -30,11 +30,12 @@ no tool will catch them for you:
   `--debug`, `DEBUG=*`), stack traces, and error messages routinely echo the environment or a
   config object. Before you quote *any* command's output back into your reply, scan it for a live
   value. If a command might print one, don't run it with secrets in scope, or discard its output.
-- **Prefer per-command unlock over a session-wide one.** `envstow unlock -- <cmd>` puts the
-  secrets only in that one child — they are never in *your* environment, so nothing you run can
-  accidentally echo them. A bare `envstow unlock` (whole session unlocked) is riskier: every
-  command then inherits the secrets and any stray output can leak one. Use the scoped form by
-  default.
+- **Prefer per-command, per-secret scope over anything wider.** `envstow run --only <NAMES> --
+  <cmd>` puts exactly the named secrets in that one child — they are never in *your* environment,
+  and the child (plus everything it spawns, like npm postinstall scripts) can't leak what it
+  wasn't given. `envstow run -- <cmd>` (or the equivalent `unlock -- <cmd>`) widens that to the
+  whole store; a bare `envstow unlock` (whole session) is widest and riskiest — every command
+  then inherits every secret. Use the narrowest form that works.
 - **Encoding is not laundering.** Base64/hex/JSON-embedding a value, or piping it through another
   tool, still exposes it. `echo "$TOKEN" | base64` is a leak.
 - **Redirect-then-read still surfaces it.** Writing a value to a file and reading the file back,
@@ -47,16 +48,20 @@ by *any* path — don't take that path. Reference the name; let `unlock` expand 
 
 ## Using a secret in a command (the main pattern)
 
-`envstow unlock -- <cmd>` runs one command with **every** secret set as an env var. Reference
+`envstow run --only <NAMES> -- <cmd>` runs one command with exactly the named secrets set as
+env vars (`--only` takes a comma list and/or repeats; omit it for the whole store). Reference
 the secret by name; the value is expanded inside the child, not by you:
 
 ```bash
-envstow unlock -- npm run build
-envstow unlock -- flyctl deploy
+envstow run --only FLY_API_TOKEN -- flyctl deploy
+envstow run -- npm run build     # no --only: whole store (unlock -- is the same)
 # When a tool needs the value as an argument, reference it by name inside a shell:
-envstow unlock -- sh -c 'psql "$DATABASE_URL" -f migrate.sql'
-envstow unlock -- sh -c 'curl -H "Authorization: Bearer $MY_SUPER_SECRET_KEY" https://api.example.com'
+envstow run --only DATABASE_URL -- sh -c 'psql "$DATABASE_URL" -f migrate.sql'
+envstow run --only MY_SUPER_SECRET_KEY -- sh -c 'curl -H "Authorization: Bearer $MY_SUPER_SECRET_KEY" https://api.example.com'
 ```
+
+A typo'd `--only` name fails **before** the command spawns, with a suggestion (`did you mean
+SENTRY_DSN?`) — fix the name and rerun; don't fall back to an unscoped run.
 
 You write the literal string `$DATABASE_URL` — inert characters. Never substitute the actual
 value yourself.
