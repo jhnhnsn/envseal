@@ -1537,6 +1537,7 @@ fn add_and_remove_recipient_controls_access() {
 // `env` — the eval-able current-shell loader
 // ---------------------------------------------------------------------------------------------
 
+#[cfg(unix)] // drives the round-trip through `sh -c`, like the refresh tests above
 #[test]
 fn env_emits_only_shell_code_and_loads_via_eval() {
     let repo = Repo::new("envcmd");
@@ -1583,6 +1584,7 @@ fn env_emits_only_shell_code_and_loads_via_eval() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn env_syncs_a_changed_store_where_refresh_cannot() {
     // The scenario the nudge points at: set/delete inside an unlocked shell, then
@@ -1629,6 +1631,7 @@ fn env_refuses_under_agent() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn env_off_unsets_names_without_needing_values() {
     let repo = Repo::new("envoff");
