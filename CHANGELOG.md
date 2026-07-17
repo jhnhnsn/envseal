@@ -2,6 +2,13 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.25
+
+### Changed
+- **The last emoji is gone:** `upgrade`'s "new version available" notice dropped its ⬆️, missed
+  by 0.1.23's sweep. A Unicode-range audit confirms the binary now emits only ⚠️ (the seven
+  security warnings) and the `••••••••` mask.
+
 ## 0.1.24
 
 ### Changed

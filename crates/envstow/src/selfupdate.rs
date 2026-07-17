@@ -138,7 +138,7 @@ pub fn cmd_upgrade(args: &[String]) -> crate::Cmd {
         eprintln!("envstow {current} is up to date (latest: {latest}).");
         return Ok(());
     }
-    eprintln!("⬆️  envstow {latest} is available (you have {current}).");
+    eprintln!("envstow {latest} is available (you have {current}).");
     eprintln!("   {}/releases/tag/v{latest}", layout::REPO_URL);
 
     if check_only {
