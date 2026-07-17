@@ -132,7 +132,7 @@ pub fn reencrypt_store(store: &Path, recipients: &[Recipient]) -> crate::Cmd {
 
     layout::write_store(store, &ct)
         .map_err(|e| AppError::msg(format!("could not write store: {e}")))?;
-    eprintln!("✔  re-encrypted store to {} recipient(s).", recips.len());
+    eprintln!("re-encrypted store to {} recipient(s).", recips.len());
     Ok(())
 }
 

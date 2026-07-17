@@ -2,6 +2,14 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.23
+
+### Changed
+- **Quieter output: emoji removed except warnings.** The 🔓/🔒/🔄/ℹ️/✔ decorations are gone from
+  every message; ⚠️ stays, and now stands out as the only marker — reserved for the lines worth
+  stopping for (shadowed values, rotation reminders, a world-readable key). The stale-shell
+  reminder also lost its leading blank line.
+
 ## 0.1.22
 
 ### Added

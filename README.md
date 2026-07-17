@@ -245,7 +245,7 @@ Copy a secret from your password manager, then paste it into `set` — the value
 
 ```bash
 envstow set MY_SUPER_SECRET_KEY --clipboard                 # read the OS clipboard directly
-#   → ✔  set MY_SUPER_SECRET_KEY (sk-pr••••••••)   ← masked confirmation of what you stored
+#   → set MY_SUPER_SECRET_KEY (sk-pr••••••••)   ← masked confirmation of what you stored
 # Uses your platform's paste tool: pbpaste (macOS), wl-paste/xclip/xsel (Linux),
 # Get-Clipboard (Windows). Piping still works if you prefer:
 pbpaste | envstow set MY_SUPER_SECRET_KEY                   # macOS: paste from clipboard
@@ -572,7 +572,7 @@ The child sees the **union** of both. Env vars are inherited, and envstow only e
 Because a silently-inherited credential is worse than a missing one, `unlock` names any collision:
 
 ```
-🔓 envstow: loaded 2 secret(s) from default: SHARED_KEY, CURA_TOKEN
+envstow: loaded 2 secret(s) from default: SHARED_KEY, CURA_TOKEN
 ⚠️  envstow: 1 name was already set with a different value — this store's value wins inside:
    SHARED_KEY
 ```

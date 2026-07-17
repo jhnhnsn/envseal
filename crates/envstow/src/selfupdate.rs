@@ -135,7 +135,7 @@ pub fn cmd_upgrade(args: &[String]) -> crate::Cmd {
     let latest = latest_version()?;
 
     if !version_is_newer(&latest, current) {
-        eprintln!("✔  envstow {current} is up to date (latest: {latest}).");
+        eprintln!("envstow {current} is up to date (latest: {latest}).");
         return Ok(());
     }
     eprintln!("⬆️  envstow {latest} is available (you have {current}).");
@@ -208,7 +208,7 @@ pub fn cmd_upgrade(args: &[String]) -> crate::Cmd {
             .status()
             .map_err(|e| AppError::msg(format!("could not run the installer: {e}")))?;
         if status.success() {
-            eprintln!("✔  updated to envstow {latest}. Open a new shell (or `hash -r`) to use it.");
+            eprintln!("updated to envstow {latest}. Open a new shell (or `hash -r`) to use it.");
             Ok(())
         } else {
             Err(AppError::msg(format!(

@@ -1367,7 +1367,7 @@ fn a_newcomer_is_told_how_to_get_access_not_just_that_it_failed() {
     let init_err = String::from_utf8_lossy(&init.stderr);
     // init must NOT claim they're ready — they can't decrypt yet.
     assert!(
-        !init_err.contains("🔓 Ready"),
+        !init_err.contains("Ready."),
         "init must not say Ready when joining someone else's store: {init_err}"
     );
     assert!(

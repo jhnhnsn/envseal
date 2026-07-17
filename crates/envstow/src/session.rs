@@ -32,7 +32,7 @@ pub fn cmd_unlock(args: &[String]) -> crate::Cmd {
 
     let names: Vec<&str> = secrets.names().collect();
     eprintln!(
-        "🔓 envstow: loaded {} secret(s) from {}: {}",
+        "envstow: loaded {} secret(s) from {}: {}",
         names.len(),
         profile,
         names.join(", ")
@@ -110,7 +110,7 @@ pub fn cmd_run(args: &[String]) -> crate::Cmd {
 
     let names: Vec<&str> = secrets.names().collect();
     eprintln!(
-        "🔓 envstow: loaded {} secret(s) from {}: {}",
+        "envstow: loaded {} secret(s) from {}: {}",
         names.len(),
         profile,
         names.join(", ")
@@ -214,7 +214,7 @@ pub fn nudge_if_unlocked_shell() {
         return;
     }
     eprintln!(
-        "\nℹ️  envstow: you're in an unlocked shell — it still holds the previous values.\n\
+        "envstow: you're in an unlocked shell — it still holds the previous values.\n\
          \x20  Run  eval \"$(envstow env)\"  to reset this shell's values\n\
          \x20  (or `exit` then `envstow unlock`)."
     );
@@ -294,7 +294,7 @@ pub fn cmd_status(args: &[String]) -> crate::Cmd {
     }
 
     if env::var_os("ENVSTOW_UNLOCKED").is_none() {
-        println!("🔒 locked — not inside an `envstow unlock` shell.");
+        println!("locked — not inside an `envstow unlock` shell.");
         return Ok(());
     }
 
@@ -303,7 +303,7 @@ pub fn cmd_status(args: &[String]) -> crate::Cmd {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| crate::layout::DEFAULT_PROFILE.to_string());
     let names = loaded_names();
-    println!("🔓 unlocked — profile: {profile}");
+    println!("unlocked — profile: {profile}");
     if names.is_empty() {
         println!("   secrets loaded: (none)");
     } else {
@@ -386,7 +386,7 @@ pub fn cmd_refresh(args: &[String]) -> crate::Cmd {
         eprintln!("envstow: nothing to unset — no secret in this shell has left the store.");
     } else {
         eprintln!(
-            "🔄 envstow: unset {} secret(s) no longer in the store: {}",
+            "envstow: unset {} secret(s) no longer in the store: {}",
             safe.len(),
             safe.iter()
                 .map(|s| s.as_str())
@@ -498,14 +498,14 @@ pub fn cmd_env(args: &[String]) -> crate::Cmd {
 
     // Everything human-facing goes to stderr, where `eval "$(...)"` won't swallow or run it.
     eprintln!(
-        "🔓 envstow: loaded {} secret(s) from {} into this shell: {}",
+        "envstow: loaded {} secret(s) from {} into this shell: {}",
         loaded.len(),
         profile,
         loaded.join(", ")
     );
     if !stale.is_empty() {
         eprintln!(
-            "🔄 envstow: unset {} secret(s) no longer in the store: {}",
+            "envstow: unset {} secret(s) no longer in the store: {}",
             stale.len(),
             stale.join(", ")
         );
@@ -541,7 +541,7 @@ fn env_off() -> crate::Cmd {
     drop(out);
 
     eprintln!(
-        "🔒 envstow: unset {} secret(s) from this shell: {}",
+        "envstow: unset {} secret(s) from this shell: {}",
         names.len(),
         names.join(", ")
     );
@@ -580,7 +580,7 @@ pub fn cmd_shell_init(args: &[String]) -> crate::Cmd {
 fn spawn_with_env(cmd: &[String], secrets: Secrets) -> crate::Cmd {
     let (program, args, interactive) = if cmd.is_empty() {
         let (sh, sh_args) = default_shell();
-        eprintln!("🔓 envstow: launching unlocked subshell. Type `exit` to lock.");
+        eprintln!("envstow: launching unlocked subshell. Type `exit` to lock.");
         (sh, sh_args, true)
     } else {
         (

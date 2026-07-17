@@ -309,7 +309,7 @@ fn cmd_set(args: &[String]) -> Cmd {
         }
         return Err(e);
     }
-    eprintln!("✔  set {name} ({preview})");
+    eprintln!("set {name} ({preview})");
 
     if let Some(mut line) = export_line.take() {
         // The caller's shell captures this via `$(…)` and eval's it — the value becomes live in
@@ -431,7 +431,7 @@ fn cmd_delete(args: &[String]) -> Cmd {
     secrets.remove(name);
 
     write_secrets(&paths.recipients, &paths.store, &secrets)?;
-    eprintln!("✔  deleted {name}");
+    eprintln!("deleted {name}");
     eprintln!(
         "\n⚠️  Deleting only removes it going forward. The value is still readable in this\n\
          \x20   store's git history by anyone who is (or was) a recipient. Rotate it at the\n\
@@ -477,7 +477,7 @@ fn cmd_init(args: &[String]) -> Cmd {
         Ok(secret) => match crypto::public_from_secret(&secret) {
             Ok(p) => {
                 eprintln!(
-                    "✔  using existing identity at {}",
+                    "using existing identity at {}",
                     layout::identity_path().display()
                 );
                 p
@@ -491,7 +491,7 @@ fn cmd_init(args: &[String]) -> Cmd {
         Err(_) => {
             let (public, mut secret) = crypto::generate_keypair();
             match layout::write_new_identity(&secret) {
-                Ok(path) => eprintln!("✔  generated identity at {}", path.display()),
+                Ok(path) => eprintln!("generated identity at {}", path.display()),
                 Err(e) => {
                     secret.zeroize();
                     return Err(AppError::msg(format!("could not write identity: {e}")));
@@ -520,7 +520,7 @@ fn cmd_init(args: &[String]) -> Cmd {
     };
     let joining_existing = !recipients.is_empty() && !recipients.iter().any(|r| r.key == public);
     if recipients.iter().any(|r| r.key == public) {
-        eprintln!("✔  already a recipient in {}", recipients_path.display());
+        eprintln!("already a recipient in {}", recipients_path.display());
     } else {
         if joining_existing {
             // A store already exists, encrypted to OTHER people. We add ourselves to the
@@ -544,13 +544,13 @@ fn cmd_init(args: &[String]) -> Cmd {
                 "could not write recipients file: {e}"
             )));
         }
-        eprintln!("✔  added you to {}", recipients_path.display());
+        eprintln!("added you to {}", recipients_path.display());
     }
 
     // 3. Encrypted store: create an empty one if absent (the default profile → .envstow/default.enc).
     let store_path = root.join(layout::STORE_FILE);
     if store_path.is_file() {
-        eprintln!("✔  store already exists at {}", store_path.display());
+        eprintln!("store already exists at {}", store_path.display());
     } else {
         let seed = b"# envstow secrets -- KEY=value lines. Edit via `envstow unlock`.\n";
         match encrypt_payload(seed, &recipients) {
@@ -558,7 +558,7 @@ fn cmd_init(args: &[String]) -> Cmd {
                 if let Err(e) = layout::write_store(&store_path, &ct) {
                     return Err(AppError::msg(format!("could not write store: {e}")));
                 }
-                eprintln!("✔  created empty store at {}", store_path.display());
+                eprintln!("created empty store at {}", store_path.display());
             }
             Err(e) => {
                 return Err(AppError::msg(format!(
@@ -589,7 +589,7 @@ fn cmd_init(args: &[String]) -> Cmd {
              \x20  Then `git pull` and you're in."
         );
     } else {
-        eprintln!("\n🔓 Ready. Add secrets by editing the store, then `envstow unlock`.");
+        eprintln!("\nReady. Add secrets by editing the store, then `envstow unlock`.");
         eprintln!("   Share your public key with collaborators so they can add you.");
     }
     Ok(())
@@ -638,7 +638,7 @@ fn maybe_install_skill(repo_root: &Path) {
     match std::fs::write(&dest, AGENT_SKILL) {
         Ok(()) => {
             let verb = if existed { "updated" } else { "added" };
-            eprintln!("✔  {verb} agent skill at {}", dest.display());
+            eprintln!("{verb} agent skill at {}", dest.display());
             eprintln!("   commit `.claude/skills/envstow/` so teammates get it on clone.");
         }
         Err(e) => eprintln!("envstow: could not write agent skill: {e}"),
@@ -680,7 +680,7 @@ fn cmd_add_recipient(args: &[String]) -> Cmd {
             "could not update recipients file: {e}"
         )));
     }
-    eprintln!("✔  added recipient to {}", paths.recipients.display());
+    eprintln!("added recipient to {}", paths.recipients.display());
     reencrypt_store(&paths.store, &recipients)
 }
 
@@ -724,7 +724,7 @@ fn cmd_remove_recipient(args: &[String]) -> Cmd {
             "could not update recipients file: {e}"
         )));
     }
-    eprintln!("✔  removed recipient; {} remain.", kept.len());
+    eprintln!("removed recipient; {} remain.", kept.len());
     reencrypt_store(&paths.store, &kept)?;
     eprintln!(
         "\n⚠️  Removing a recipient only blocks FUTURE decryptions. Their key still decrypts\n\
@@ -831,7 +831,7 @@ fn profile_create(name: &str) -> Cmd {
         .map_err(|e| AppError::msg(format!("could not create profile store: {e}")))?;
     layout::write_store(&paths.store, &ct)
         .map_err(|e| AppError::msg(format!("could not write store: {e}")))?;
-    eprintln!("✔  created profile '{name}' at {}", paths.store.display());
+    eprintln!("created profile '{name}' at {}", paths.store.display());
     eprintln!(
         "   use it with:  envstow --profile {name} set <NAME>   (or export ENVSTOW_PROFILE={name})"
     );
