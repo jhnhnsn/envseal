@@ -264,13 +264,13 @@ fn profiles_are_isolated() {
     );
 
     // Each profile reads back its OWN value (isolation).
-    let d = repo.run(&["unlock", "--", "sh", "-c", "printf '%s' \"$SHARED\""], "");
+    let d = repo.run(&["run", "--", "sh", "-c", "printf '%s' \"$SHARED\""], "");
     assert_eq!(d.stdout, "default-val", "default profile value");
     let p = repo.run(
         &[
             "--profile",
             "prod",
-            "unlock",
+            "run",
             "--",
             "sh",
             "-c",
@@ -283,7 +283,7 @@ fn profiles_are_isolated() {
     // Both flag positions work: post-command --profile too.
     let p2 = repo.run(
         &[
-            "unlock",
+            "run",
             "--profile",
             "prod",
             "--",
@@ -367,7 +367,7 @@ fn multiline_value_roundtrips() {
     // It must come back byte-for-byte through unlock. Write it to a file and compare, so no
     // value is echoed; base64 the file contents for an exact, newline-safe comparison.
     let script = "printf '%s' \"$TLS_KEY\" | base64 | tr -d '\\n'";
-    let out = repo.run(&["unlock", "--", "sh", "-c", script], "");
+    let out = repo.run(&["run", "--", "sh", "-c", script], "");
     let got_b64 = out.stdout.trim();
     use base64::Engine;
     let expected_b64 = base64::engine::general_purpose::STANDARD.encode(pem.as_bytes());
@@ -403,7 +403,7 @@ fn set_list_and_unlock_roundtrip() {
     // unlock -- <cmd> sets the vars; the child confirms exact round-trip WITHOUT printing them.
     let check = repo.run(
         &[
-            "unlock",
+            "run",
             "--",
             "sh",
             "-c",
@@ -473,7 +473,7 @@ fn set_clipboard_stores_the_clipboard_contents() {
     // It round-trips exactly, with the tool's trailing newline stripped.
     let check = repo.run(
         &[
-            "unlock",
+            "run",
             "--",
             "sh",
             "-c",
@@ -896,7 +896,7 @@ fn refresh_unsets_a_deleted_secret_via_eval() {
         echo REFRESH-OK
         "#
     );
-    let out = repo.run(&["unlock", "--", "sh", "-c", &script], "");
+    let out = repo.run(&["run", "--", "sh", "-c", &script], "");
     assert!(
         out.stdout.contains("REFRESH-OK"),
         "refresh should unset the deleted secret in-place: {} {}",
@@ -924,7 +924,7 @@ fn refresh_never_emits_a_value() {
         {bin} refresh 2>/dev/null
         "#
     );
-    let out = repo.run(&["unlock", "--", "sh", "-c", &script], "");
+    let out = repo.run(&["run", "--", "sh", "-c", &script], "");
     assert!(
         !out.stdout.contains("goneval")
             && !out.stdout.contains("staysval")
@@ -968,7 +968,7 @@ fn refresh_only_touches_names_envstow_set() {
         {bin} refresh 2>/dev/null
         "#
     );
-    let out = repo.run(&["unlock", "--", "sh", "-c", &script], "");
+    let out = repo.run(&["run", "--", "sh", "-c", &script], "");
     assert!(
         !out.stdout.contains("NOT_MINE"),
         "must not unset a var envstow didn't set: {:?}",
@@ -1009,7 +1009,7 @@ fn unlock_warns_when_it_shadows_a_different_value() {
     assert_eq!(repo.run(&["set", "ONLY_HERE"], "uncontested").code, 0);
 
     // Simulate an outer unlock (or a shell rc) having already set the same name differently.
-    let out = repo.run_env(&["unlock", "--", "true"], "", "DATABASE_URL", "outer-value");
+    let out = repo.run_env(&["run", "--", "true"], "", "DATABASE_URL", "outer-value");
     assert_eq!(out.code, 0, "unlock should still succeed: {}", out.stderr);
     assert!(
         out.stderr.contains("already set with a different value"),
@@ -1042,7 +1042,7 @@ fn unlock_warns_when_it_shadows_a_different_value() {
     // Warning only: the store's value still wins inside the child.
     let check = repo.run_env(
         &[
-            "unlock",
+            "run",
             "--",
             "sh",
             "-c",
@@ -1068,7 +1068,7 @@ fn unlock_is_quiet_when_the_value_is_unchanged() {
     assert_eq!(repo.run(&["init"], "").code, 0);
     assert_eq!(repo.run(&["set", "TOKEN"], "samevalue").code, 0);
 
-    let out = repo.run_env(&["unlock", "--", "true"], "", "TOKEN", "samevalue");
+    let out = repo.run_env(&["run", "--", "true"], "", "TOKEN", "samevalue");
     assert_eq!(out.code, 0);
     assert!(
         !out.stderr.contains("already set"),
@@ -1117,7 +1117,7 @@ fn headerless_store_still_reads() {
 
     let check = repo.run(
         &[
-            "unlock",
+            "run",
             "--",
             "sh",
             "-c",
@@ -1260,7 +1260,7 @@ fn delete_removes_only_the_named_secret() {
     // The store still decrypts and the survivor round-trips unchanged.
     let check = repo.run(
         &[
-            "unlock",
+            "run",
             "--",
             "sh",
             "-c",
@@ -1306,7 +1306,7 @@ fn delete_is_scoped_to_one_profile() {
         .stdout
         .contains("SHARED"));
 
-    let d = repo.run(&["unlock", "--", "sh", "-c", "printf '%s' \"$SHARED\""], "");
+    let d = repo.run(&["run", "--", "sh", "-c", "printf '%s' \"$SHARED\""], "");
     assert_eq!(d.stdout, "default-val", "default profile must be untouched");
 }
 
@@ -1379,7 +1379,7 @@ fn a_newcomer_is_told_how_to_get_access_not_just_that_it_failed() {
     // just APPENDED their key to recipients, so they're in the listed-but-not-yet-re-encrypted
     // case — the honest fix is a recipient running `reencrypt`, and that's what it must say.
     let unlock = Command::new(BIN)
-        .args(["unlock", "--", "true"])
+        .args(["run", "--", "true"])
         .current_dir(&owner.dir)
         .env("ENVSTOW_IDENTITY", &newcomer_id)
         .output()
@@ -1490,7 +1490,7 @@ fn add_and_remove_recipient_controls_access() {
     let mut as_collab_cmd = Command::new(BIN);
     as_collab_cmd
         .args([
-            "unlock",
+            "run",
             "--",
             "sh",
             "-c",
@@ -1517,7 +1517,7 @@ fn add_and_remove_recipient_controls_access() {
     // Now the collaborator can NO LONGER decrypt.
     let mut after_cmd = Command::new(BIN);
     after_cmd
-        .args(["unlock", "--", "true"])
+        .args(["run", "--", "true"])
         .current_dir(&owner.dir)
         .env("ENVSTOW_IDENTITY", &collab.identity);
     clear_agent_markers(&mut after_cmd);
@@ -1572,7 +1572,7 @@ fn env_emits_only_shell_code_and_loads_via_eval() {
         printf '%s' "$STAYS"
         "#
     );
-    let evaled = repo.run(&["unlock", "--", "sh", "-c", &script], "");
+    let evaled = repo.run(&["run", "--", "sh", "-c", &script], "");
     assert_eq!(
         evaled.stdout, hostile,
         "eval must reproduce the value byte-for-byte, not execute it"
@@ -1603,7 +1603,7 @@ fn env_syncs_a_changed_store_where_refresh_cannot() {
         printf 'STAYS=%s GONE=%s' "$STAYS" "${{GONE:-unset}}"
         "#
     );
-    let out = repo.run(&["unlock", "--", "sh", "-c", &script], "");
+    let out = repo.run(&["run", "--", "sh", "-c", &script], "");
     assert_eq!(
         out.stdout, "STAYS=newval GONE=unset",
         "env must update changed values and unset deleted ones: {:?} / {}",
@@ -1625,8 +1625,8 @@ fn env_refuses_under_agent() {
         out.stdout
     );
     assert!(
-        !out.stderr.contains("secretval") && out.stderr.contains("unlock"),
-        "stderr should redirect the agent to unlock, without the value: {}",
+        !out.stderr.contains("secretval") && out.stderr.contains("run --only"),
+        "stderr should redirect the agent to run --only, without the value: {}",
         out.stderr
     );
 }
@@ -1645,7 +1645,7 @@ fn env_off_unsets_names_without_needing_values() {
         printf 'TOK=%s UNLOCKED=%s' "${{TOK:-unset}}" "${{ENVSTOW_UNLOCKED:-unset}}"
         "#
     );
-    let out = repo.run(&["unlock", "--", "sh", "-c", &script], "");
+    let out = repo.run(&["run", "--", "sh", "-c", &script], "");
     assert_eq!(
         out.stdout, "TOK=unset UNLOCKED=unset",
         "--off must clear the secrets and the markers: {:?} / {}",
@@ -1732,6 +1732,33 @@ fn run_rejects_unknown_names_before_spawning() {
         "child must not spawn on a bad --only: {:?}",
         out.stdout
     );
+}
+
+#[test]
+fn unlock_with_a_command_redirects_to_run() {
+    // The one-shot form moved to `run` — `unlock` is subshell-only. Old muscle memory gets a
+    // pointer, and the command must NOT execute.
+    let repo = Repo::new("unlocksplit");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "TOK"], "tokval").code, 0);
+
+    for form in [
+        vec!["unlock", "--", "sh", "-c", "echo RAN"],
+        vec!["unlock", "sh", "-c", "echo RAN"],
+    ] {
+        let out = repo.run(&form, "");
+        assert_ne!(out.code, 0, "unlock with args must refuse: {form:?}");
+        assert!(
+            out.stderr.contains("envstow run"),
+            "should redirect to run: {}",
+            out.stderr
+        );
+        assert!(
+            !out.stdout.contains("RAN"),
+            "the command must not execute: {:?}",
+            out.stdout
+        );
+    }
 }
 
 #[test]

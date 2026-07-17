@@ -6,7 +6,7 @@
 //!   envstow get <NAME> [--show]     Resolve one secret by name (masked under an agent).
 //!   envstow set <NAME> [--clipboard] Store a value from stdin, or the OS clipboard.
 //!   envstow delete <NAME>           Remove one secret and re-encrypt (then rotate!).
-//!   envstow unlock [-- <cmd>...]    Spawn a subshell / run a command with the whole env set.
+//!   envstow unlock                  Interactive subshell with the whole env set; `exit` locks.
 //!   envstow run [--only A,B] -- <c> Run one command with all — or only the named — secrets.
 //!   envstow env [--off]             Emit eval-able exports/unsets for the CURRENT shell (guarded).
 //!   envstow refresh                 Emit `unset` lines for secrets that left the store (eval it).
@@ -186,7 +186,7 @@ fn cmd_get(args: &[String]) -> Cmd {
         println!("{}", mask(value));
         eprintln!(
             "envstow: value masked (running under an agent or a terminal). \
-             Use it by name via `envstow unlock -- <cmd using ${name}>`, \
+             Use it by name via `envstow run --only {name} -- <cmd using ${name}>`, \
              or pass --show to reveal."
         );
     }
@@ -852,12 +852,12 @@ fn print_help() {
          \x20 envstow delete <NAME>            Remove one secret and re-encrypt (then rotate).\n\
          \x20 envstow list                     List secret NAMES (never values).\n\
          \x20 envstow pubkey                   Print your age PUBLIC key (share it to be added).\n\
-         \x20 envstow unlock [-- <cmd>...]     Subshell / run a command with the whole env set.\n\
+         \x20 envstow unlock                   Interactive subshell with every secret set; `exit` locks.\n\
          \x20 envstow run [--only A,B] -- <c>  Run one command with all — or only the named — secrets.\n\
          \x20 envstow env [--off]              Load (or --off: unset) secrets in THIS shell: eval \"$(envstow env)\".\n\
          \x20 envstow refresh                  Unset secrets that left the store: eval \"$(envstow refresh)\".\n\
          \x20 envstow status                   Show whether you're unlocked, the profile, and secret NAMES.\n\
-         \x20 envstow shell-init               Print a shell wrapper so `set` in an unlocked shell goes live: eval \"$(envstow shell-init)\".\n\
+         \x20 envstow shell-init               Print the optional shell hook for your rc: eval \"$(envstow shell-init)\".\n\
          \x20 envstow init [--no-skill]        Create identity + recipients + store; add agent skill.\n\
          \x20 envstow add-recipient <age1..>   Add a collaborator and re-encrypt.\n\
          \x20 envstow remove-recipient <k|nm>  Remove a collaborator and re-encrypt (then rotate).\n\
@@ -866,16 +866,17 @@ fn print_help() {
          \x20 envstow profiles                 List available profiles.\n\
          \x20 envstow upgrade [--check|--yes]  Upgrade envstow to the latest release.\n\
          \x20 envstow scan-leak                Hook: block tool output that leaks a value (see GUARDRAILS.md).\n\
+         \x20 envstow --version                Print the envstow version.\n\
          \n\
          Profiles: add `--profile <name>` to any command to use a separate secret set\n\
          (e.g. dev/staging/prod), or set $ENVSTOW_PROFILE. Default is `default`.\n\
-         \x20 envstow --version                Print the envstow version.\n\
          \n\
          EXAMPLES:\n\
          \x20 envstow set MY_TOKEN --clipboard         # store a secret straight from the clipboard\n\
-         \x20 do-thing \"$(envstow get DB_PASSWORD)\"   # by name; masked if an agent runs it bare\n\
-         \x20 envstow unlock -- npm run build          # run one command with all secrets set\n\
-         \x20 envstow unlock                           # start your AI in an unlocked subshell\n\
+         \x20 envstow run --only DB_URL -- ./migrate   # one command, only the secrets it needs\n\
+         \x20 envstow run -- npm run build             # one command, whole store\n\
+         \x20 envstow unlock                           # interactive subshell (agents: prefer run --only)\n\
+         \x20 do-thing \"$(envstow get DB_PASSWORD)\"    # one value by name; masked under an agent\n\
          \n\
          All crypto is the `age` crate — no external tools. Values are never printed unless\n\
          output is safe or you pass --show."

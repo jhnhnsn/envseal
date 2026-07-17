@@ -6,7 +6,7 @@
 > agent/editor in use.
 
 envstow keeps secrets encrypted and lets programs use them **by name**. That already keeps a
-value out of your transcript when you run `envstow unlock -- <cmd>`. These guardrails add
+value out of your transcript when you run `envstow run -- <cmd>`. These guardrails add
 *defense in depth* so an agent is steered away from — and mechanically blocked from —
 accidentally exposing a secret value.
 
@@ -18,7 +18,7 @@ three; other agents support layers 1 and (via their own hook system) 3.
 ## Layer 1 — Instructions (works with every agent)
 
 Tell the agent the rules: reference secrets by name, never print/echo/log a value, use
-`envstow unlock -- <cmd>`. Where these live depends on the agent:
+`envstow run -- <cmd>`. Where these live depends on the agent:
 
 | Agent | Put the rules in |
 |---|---|
@@ -36,7 +36,7 @@ Minimum text to include (adapt wording to the file):
 - Never print, echo, log, or paste a secret VALUE. Never run `env`, `printenv`,
   `echo $SOME_SECRET`, or `cat` a file that holds one.
 - To use a secret in a command, run it through envstow so the value stays in the child
-  process: `envstow unlock -- sh -c 'deploy --token "$MY_SUPER_SECRET_KEY"'`.
+  process: `envstow run -- sh -c 'deploy --token "$MY_SUPER_SECRET_KEY"'`.
 - `envstow get <NAME>` masks its output under an agent — that is intentional; do not try to
   defeat it. If a human needs a value, they run `envstow get <NAME> --show` themselves.
 - If you think you need a plaintext value, STOP and ask the human.

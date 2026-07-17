@@ -2,6 +2,20 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.24
+
+### Changed
+- **`unlock` and `run` fully separated — each verb now means exactly one thing.** `envstow
+  unlock` opens an interactive subshell (`exit` locks) and **no longer takes a command**;
+  `unlock -- <cmd>` prints a redirect to `envstow run [--only NAME,...] -- <cmd>` instead of
+  silently duplicating it. The shell verbs are now a clean triad: `unlock` = subshell, `run` =
+  one command (scope with `--only`), `env` = this shell (guarded eval). Every doc, example, and
+  in-binary hint that suggested `unlock -- <cmd>` now says `run` — including `get`'s masking
+  hint and `env`'s agent refusal, which now point at `run --only <NAMES>`.
+- **Help text refreshed:** `--version` rejoined the USAGE block, examples lead with
+  `run --only`, and the `get` example's comment now correctly says values are masked under an
+  agent (always — not just when run "bare").
+
 ## 0.1.23
 
 ### Changed

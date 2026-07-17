@@ -135,8 +135,8 @@ You never need the plaintext. Run commands that need secrets through envstow —
 env vars for that one command:
 
 ```bash
-envstow unlock -- npm run build
-envstow unlock -- sh -c 'deploy --token "$FLY_API_TOKEN"'
+envstow run -- npm run build
+envstow run -- sh -c 'deploy --token "$FLY_API_TOKEN"'
 ```
 
 Or start your whole session unlocked:

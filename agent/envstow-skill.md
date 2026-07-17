@@ -33,9 +33,9 @@ no tool will catch them for you:
 - **Prefer per-command, per-secret scope over anything wider.** `envstow run --only <NAMES> --
   <cmd>` puts exactly the named secrets in that one child — they are never in *your* environment,
   and the child (plus everything it spawns, like npm postinstall scripts) can't leak what it
-  wasn't given. `envstow run -- <cmd>` (or the equivalent `unlock -- <cmd>`) widens that to the
-  whole store; a bare `envstow unlock` (whole session) is widest and riskiest — every command
-  then inherits every secret. Use the narrowest form that works.
+  wasn't given. `envstow run -- <cmd>` widens that to the whole store; a bare `envstow unlock`
+  (whole session subshell) is widest and riskiest — every command then inherits every secret.
+  Use the narrowest form that works.
 - **Encoding is not laundering.** Base64/hex/JSON-embedding a value, or piping it through another
   tool, still exposes it. `echo "$TOKEN" | base64` is a leak.
 - **Redirect-then-read still surfaces it.** Writing a value to a file and reading the file back,
@@ -44,7 +44,7 @@ no tool will catch them for you:
   quoting a "masked" value you managed to partially reveal, defeats the point.
 
 Rule of thumb: if plaintext could end up in your reply, a file, a commit, or a tool-call argument
-by *any* path — don't take that path. Reference the name; let `unlock` expand it in a child.
+by *any* path — don't take that path. Reference the name; let `run` expand it in a child.
 
 ## Using a secret in a command (the main pattern)
 
@@ -54,7 +54,7 @@ the secret by name; the value is expanded inside the child, not by you:
 
 ```bash
 envstow run --only FLY_API_TOKEN -- flyctl deploy
-envstow run -- npm run build     # no --only: whole store (unlock -- is the same)
+envstow run -- npm run build     # no --only: whole store
 # When a tool needs the value as an argument, reference it by name inside a shell:
 envstow run --only DATABASE_URL -- sh -c 'psql "$DATABASE_URL" -f migrate.sql'
 envstow run --only MY_SUPER_SECRET_KEY -- sh -c 'curl -H "Authorization: Bearer $MY_SUPER_SECRET_KEY" https://api.example.com'
@@ -120,7 +120,7 @@ exit && envstow unlock  # restart the unlocked shell
 Both cover added, changed, and deleted secrets alike. `envstow env` is for the **human's**
 shell only — it prints plaintext for their shell to eval, and it refuses to run under an agent.
 That refusal is working as intended; never try to work around it. *You* pick up store changes
-by re-running `envstow unlock -- <cmd>`, which needs no reset at all — every `unlock` reads the
+by re-running `envstow run -- <cmd>`, which needs no reset at all — every `run` reads the
 store fresh.
 
 ## Removing a secret

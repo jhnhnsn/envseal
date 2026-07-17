@@ -57,7 +57,7 @@ git add .envstow && git commit -m "Add alice" && git push
 ```bash
 git pull
 envstow list                                # sees the names
-envstow unlock -- your-app                  # runs it with the secrets set, values by name
+envstow run -- your-app                  # runs it with the secrets set, values by name
 ```
 
 That's the whole loop. The public key is safe to share; the value never leaves an encrypted store
@@ -128,7 +128,7 @@ one of the tools below is the right call, and this grid is meant to send you the
 | **Install footprint** | one binary, no deps | `sops` + a key backend | `git-crypt` + GPG | `op` CLI + app | CLI + account | CLI + infra |
 | **Commit secrets to git** | ✅ (ciphertext) | ✅ (ciphertext) | ✅ (ciphertext) | ❌ (refs only) | ❌ (refs only) | ❌ |
 | **Who can decrypt** | per-recipient age key | age/PGP/KMS keys | GPG or shared key | account / groups | teams / roles | IAM / policies |
-| **Run a cmd with secrets** | `unlock -- cmd` | `sops exec-env` | (files on disk) | `op run -- cmd` | `run -- cmd` | via SDK/CLI |
+| **Run a cmd with secrets** | `run -- cmd` | `sops exec-env` | (files on disk) | `op run -- cmd` | `run -- cmd` | via SDK/CLI |
 | **Reference by name, value off the CLI** | ✅ core design | partial | ❌ (plaintext on disk) | ✅ (`op://…` refs) | ✅ | ✅ |
 | **AI-agent masking / leak guard** | ✅ built in | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Central audit log** | ❌ (git history only) | ❌ | ❌ | ✅ | ✅ | ✅ |
@@ -288,7 +288,8 @@ That `npm run build` above? Its dependencies' postinstall scripts inherit the ch
 of it. `--only` is least privilege for exactly that case: the command gets the named secrets and
 nothing else. A typo'd name is a **hard error before anything spawns** (`unknown secret
 'SENTRY_DNS' (did you mean SENTRY_DSN?)`) — never a child launched with a silently missing
-variable. (`envstow unlock -- <cmd>` still works as the same thing without scoping.)
+variable. (One-shot commands are `run`'s job alone — `envstow unlock` opens an interactive
+subshell and no longer takes a command.)
 
 ### 4. Working with an AI agent
 
@@ -361,23 +362,23 @@ she kept. **Rotation is the real revocation:** regenerate each secret she saw at
 Point `$ENVSTOW_IDENTITY` at a dedicated CI key (added as a recipient, stored as a CI secret):
 
 ```bash
-ENVSTOW_IDENTITY=/path/to/ci-key envstow unlock -- npm run deploy
+ENVSTOW_IDENTITY=/path/to/ci-key envstow run -- npm run deploy
 ```
 
 ### On Windows
 
 Most commands are identical — `envstow init`, `list`, `pubkey`, `add-recipient`, and
-`envstow unlock -- <program>` all work as-is. Only a few things differ:
+`envstow run -- <program>` all work as-is. Only a few things differ:
 
 ```powershell
 # Your identity lives at %APPDATA%\envstow\identity.txt.
 'sk-proj-abc123' | envstow set MY_SUPER_SECRET_KEY     # PowerShell pipes a value to stdin
-envstow unlock -- npm run build                   # runs the program directly — same as POSIX
+envstow run -- npm run build                   # runs the program directly — same as POSIX
 
 # The only real difference: no `sh -c`. To reference a value by name in a shell,
 # use PowerShell (%VAR% for cmd.exe):
-envstow unlock -- powershell -c 'psql $env:DATABASE_URL -f migrate.sql'
-envstow unlock -- cmd /c "psql %DATABASE_URL% -f migrate.sql"
+envstow run -- powershell -c 'psql $env:DATABASE_URL -f migrate.sql'
+envstow run -- cmd /c "psql %DATABASE_URL% -f migrate.sql"
 
 # Start an unlocked subshell (cmd.exe by default via %COMSPEC%):
 envstow unlock
@@ -407,7 +408,7 @@ stores (`.envstow/<profile>.enc`), all keyed to the same `.envstow/recipients`. 
 ```bash
 envstow profile create prod                 # create a new profile (empty store)
 envstow --profile prod set DB_URL           # write to prod's store
-envstow --profile prod unlock -- npm start  # run with prod's secrets
+envstow --profile prod run -- npm start  # run with prod's secrets
 export ENVSTOW_PROFILE=prod                  # …or make it sticky for the shell
 envstow profile                              # show the current profile + list available
 envstow profiles                             # list profiles
@@ -429,7 +430,7 @@ env var > `default`. Using a profile that doesn't exist errors and tells you to
 | `envstow get <NAME> [--show]` | Resolve one secret by name. **Masked under an agent** unless `--show`. |
 | `envstow list` | List secret **names** (never values). |
 | `envstow pubkey` | Print your age **public** key, to share so a member can add you. |
-| `envstow unlock [-- <cmd>]` | Run a command (or subshell) with every secret set as an env var. |
+| `envstow unlock` | Interactive subshell with every secret set as an env var; `exit` locks. |
 | `envstow run [--only A,B] -- <cmd>` | Run one command with all — or `--only` the named — secrets. Unknown names error before spawning. |
 | `envstow status` | Show whether you're in an unlocked shell, which profile, and the loaded secret **names** (never values; reads only env markers). |
 | `eval "$(envstow env)"` | Load — or reset, after a store change — every secret in **this** shell, no subshell. Refuses under an agent and when stdout is a terminal; see [Stale secrets](#stale-secrets-in-an-unlocked-shell). |
@@ -477,7 +478,7 @@ style = "bold yellow"
 ## Why this is AI-safe
 
 The environment-variable channel and the AI's context channel are **separate**. You tell the
-agent "the token is in `$FLY_API_TOKEN`", and it runs `envstow unlock -- sh -c 'deploy --token
+agent "the token is in `$FLY_API_TOKEN`", and it runs `envstow run -- sh -c 'deploy --token
 "$FLY_API_TOKEN"'`. The shell expands `$FLY_API_TOKEN` *inside the child envstow spawns* — the
 value never appears in the agent's tool call or its output.
 

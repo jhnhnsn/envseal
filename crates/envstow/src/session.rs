@@ -14,16 +14,21 @@ use crate::error::AppError;
 use crate::secrets::Secrets;
 use crate::store::load_secrets;
 
-/// `envstow unlock [-- <cmd>...]` — decrypt the whole store and set every value as an env var
-/// for a spawned child (an interactive subshell, or the given command). Values never printed;
-/// only variable NAMES are listed.
+/// `envstow unlock` — decrypt the whole store and open an interactive SUBSHELL with every value
+/// set as an env var; `exit` locks. Values never printed; only variable NAMES are listed.
+///
+/// The three shell verbs each mean exactly one thing: `unlock` = interactive subshell,
+/// `run` = one command (scoped with `--only`), `env` = the current shell (guarded eval).
+/// `unlock -- <cmd>` used to be the one-shot form; it moved to `run` in 0.1.24 and any trailing
+/// args now get a redirect rather than silently overlapping with `run`.
 pub fn cmd_unlock(args: &[String]) -> crate::Cmd {
     let (profile, args) = resolve_profile(args)?;
-    // Everything after `--` (or all args) is the command to run; empty → interactive subshell.
-    let cmd: Vec<String> = match args.iter().position(|a| a == "--") {
-        Some(i) => args[i + 1..].to_vec(),
-        None => args.to_vec(),
-    };
+    if !args.is_empty() {
+        return Err(AppError::usage(
+            "`unlock -- <cmd>` moved — use `envstow run [--only NAME,...] -- <cmd>`.\n\
+             \x20  `unlock` now only opens an interactive subshell (`exit` to lock).",
+        ));
+    }
 
     let secrets = load_secrets(&profile)?;
     if secrets.is_empty() {
@@ -39,15 +44,15 @@ pub fn cmd_unlock(args: &[String]) -> crate::Cmd {
     );
     warn_on_shadowed(&secrets);
 
-    spawn_with_env(&cmd, secrets)
+    spawn_with_env(&[], secrets)
 }
 
 /// `envstow run [--only NAME[,NAME...]]... [--] <cmd>...` — run ONE command with secrets in its
 /// env: all of them by default, or exactly the named ones with `--only` (least privilege — an
 /// `npm install`'s postinstall scripts get the deploy token they need, not the whole store).
 ///
-/// `run` is the one-shot verb; `unlock` remains the interactive-subshell verb (and keeps its
-/// `unlock -- <cmd>` form for compatibility). `--only` takes a comma list, repeats, or both.
+/// `run` is the one-shot verb; `unlock` is the interactive-subshell verb — each does exactly
+/// one thing. `--only` takes a comma list, repeats, or both.
 /// An unknown name is a HARD error before anything spawns — launching the child with a silently
 /// missing variable would fail later and further from the cause. `ENVSTOW_LOADED` reflects the
 /// scoped set, so `status` and the leak guard see exactly what's live.
@@ -432,8 +437,8 @@ pub fn cmd_env(args: &[String]) -> crate::Cmd {
     if !off && crate::agent::under_agent() {
         return Err(AppError::msg(
             "refusing to print secret values under an AI agent.\n\
-             \x20  Agents use `envstow unlock -- <cmd>` — values stay in the child's env,\n\
-             \x20  out of the transcript.",
+             \x20  Agents use `envstow run --only <NAMES> -- <cmd>` — values stay in the\n\
+             \x20  child's env, out of the transcript.",
         ));
     }
     if io::stdout().is_terminal() {

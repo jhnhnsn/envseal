@@ -9,8 +9,8 @@ use std::env;
 /// Environment markers set by AI coding agents that capture command output into their context.
 /// If any is present, `get` masks its value so plaintext can't land in the agent's transcript.
 /// This is a best-effort allowlist across known tools plus a generic opt-in — an agent that
-/// sets none of these is still expected to use `unlock -- <cmd>` (secrets by name), which never
-/// exposes a value regardless of detection.
+/// sets none of these is still expected to use `run --only <NAMES> -- <cmd>` (secrets by name),
+/// which never exposes a value regardless of detection.
 pub const AGENT_ENV_MARKERS: &[&str] = &[
     // Claude Code
     "CLAUDECODE",

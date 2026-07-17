@@ -76,6 +76,6 @@ unlocked session. Prints **names only**. Exit = lock.
 ## Explicitly dropped / deferred
 
 - **`sync` (fly/wrangler push):** dropped. Those tools are *consumers*; use
-  `envstow get`/`unlock -- <cmd>` with them directly.
+  `envstow get`/`run -- <cmd>` with them directly.
 - **cargo-dist packaging:** deferred to a later pass.
 - **rops / SOPS-format reimplementation:** dropped in favor of the `age` crate + dotenv.
