@@ -7,7 +7,9 @@
 //!   envstow set <NAME> [--clipboard] Store a value from stdin, or the OS clipboard.
 //!   envstow delete <NAME>           Remove one secret and re-encrypt (then rotate!).
 //!   envstow unlock [-- <cmd>...]    Spawn a subshell / run a command with the whole env set.
+//!   envstow env [--off]             Emit eval-able exports/unsets for the CURRENT shell (guarded).
 //!   envstow refresh                 Emit `unset` lines for secrets that left the store (eval it).
+//!   envstow shell-init              Print the optional shell wrapper to source from your rc.
 //!   envstow status                  Show unlock state, profile, and loaded secret NAMES.
 //!   envstow upgrade [--check|--yes] Check for / install a newer envstow.
 //!   envstow scan-leak               PostToolUse hook: block tool output containing a live value.
@@ -27,7 +29,6 @@
 //!     human explicitly passes `--show`.
 
 use std::env;
-use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
 use std::process::Command;
@@ -49,8 +50,7 @@ use agent::{mask, masked_preview, under_agent};
 use cli::{parse_simple, resolve_profile};
 use error::AppError;
 use layout::Recipient;
-use secrets::Secrets;
-use store::{encrypt_payload, load_secrets, reencrypt_store, render_dotenv, write_secrets};
+use store::{encrypt_payload, load_secrets, reencrypt_store, write_secrets};
 
 /// A command's result: `Ok(())` on success, or an [`AppError`] carrying the message and exit code.
 type Cmd = Result<(), AppError>;
@@ -92,12 +92,22 @@ fn main() {
         Some("get") => cmd_get(&args[1..]),
         Some("set") => cmd_set(&args[1..]),
         Some("delete") => cmd_delete(&args[1..]),
-        Some("edit") => cmd_edit(&args[1..]),
+        // Removed in 0.1.21: `edit` was the one command that parked the whole store's plaintext
+        // on disk for an editor session (editor swap/undo files outlive any shred, and it had no
+        // agent guard). A tombstone beats "unknown command" for anyone who used it.
+        Some("edit") => Err(AppError::msg(
+            "`edit` was removed — it wrote the whole store's plaintext to a temp file for your \
+             editor,\n  which editors copy into swap/undo files envstow can't clean up.\n  \
+             Use `envstow set <NAME>` to add or change (pipe for multi-line values) and \
+             `envstow delete <NAME>` to remove.",
+        )),
         Some("list") => cmd_list(&args[1..]),
         Some("pubkey") => cmd_pubkey(),
         Some("unlock") => session::cmd_unlock(&args[1..]),
+        Some("env") => session::cmd_env(&args[1..]),
         Some("refresh") => session::cmd_refresh(&args[1..]),
         Some("status") => session::cmd_status(&args[1..]),
+        Some("shell-init") => session::cmd_shell_init(&args[1..]),
         Some("scan-leak") => leakscan::cmd_scan_leak(&args[1..]),
         // `upgrade` is the canonical name (deno upgrade, rustup self update): "upgrade" means
         // the program itself, while "update" tends to mean the things a program manages (npm
@@ -190,8 +200,19 @@ fn cmd_get(args: &[String]) -> Cmd {
 /// `--clipboard` reads the OS clipboard instead of stdin (same guarantee: never in argv).
 fn cmd_set(args: &[String]) -> Cmd {
     let (profile, args) = resolve_profile(args)?;
-    let parsed = parse_simple(&args, &[("--clipboard", "clipboard"), ("-c", "clipboard")])?;
+    let parsed = parse_simple(
+        &args,
+        // `--export` is an internal flag used by the shell wrapper `unlock` installs: after
+        // storing, it prints `export NAME=<value>` to stdout so the CALLER's shell can `eval` it
+        // and the value goes live in that shell. Not documented in the usage string.
+        &[
+            ("--clipboard", "clipboard"),
+            ("-c", "clipboard"),
+            ("--export", "export"),
+        ],
+    )?;
     let from_clipboard = parsed.has("clipboard");
+    let want_export = parsed.has("export");
     let Some(name) = parsed.positional else {
         return Err(AppError::usage(
             "usage: envstow set <NAME> [--profile P] [--clipboard]   (then type the value + \
@@ -262,13 +283,46 @@ fn cmd_set(args: &[String]) -> Cmd {
         masked_preview(&value)
     };
 
+    // If asked to export (and it's safe to — never emit a value under an agent, whose stdout is
+    // the transcript), build the `export NAME=<value>` line now, before `value` is moved into the
+    // store. The value is shell-single-quoted so ANY content (spaces, `;`, `$()`, newlines) is
+    // inert when the caller's shell eval's it — the injection-safety counterpart to refresh's
+    // identifier check, but for a value.
+    let mut export_line = if want_export && !under_agent() {
+        Some(format!(
+            "export {name}={}",
+            session::shell_single_quote(&value)
+        ))
+    } else {
+        None
+    };
+
     // Hand the value to the store (upsert scrubs any prior value it replaces). `value` is moved
     // in, so nothing left here to zeroize; `secrets` scrubs everything on drop.
     secrets.upsert(name, value);
 
-    write_secrets(&paths.recipients, &paths.store, &secrets)?;
+    if let Err(e) = write_secrets(&paths.recipients, &paths.store, &secrets) {
+        if let Some(mut line) = export_line {
+            line.zeroize();
+        }
+        return Err(e);
+    }
     eprintln!("✔  set {name} ({preview})");
-    session::nudge_if_unlocked_shell();
+
+    if let Some(mut line) = export_line.take() {
+        // The caller's shell captures this via `$(…)` and eval's it — the value becomes live in
+        // that shell without ever being displayed. Zeroize our copy right after writing it.
+        {
+            let mut out = io::stdout().lock();
+            let _ = writeln!(out, "{line}");
+            let _ = out.flush();
+        }
+        line.zeroize();
+    } else {
+        // Couldn't make it live (no --export, or under an agent) — nudge to re-unlock if we're in
+        // an unlocked shell holding now-stale values.
+        session::nudge_if_unlocked_shell();
+    }
     Ok(())
 }
 
@@ -404,103 +458,6 @@ fn cmd_pubkey() -> Cmd {
         .map_err(|e| AppError::msg(format!("identity is unreadable: {e}")))?;
     println!("{public}");
     Ok(())
-}
-
-/// `envstow edit` — decrypt the store to a private temp file, open `$EDITOR` on it, then
-/// re-encrypt the edited dotenv back to the store. The plaintext temp file is created 0600 in
-/// the user's config dir, overwritten with zeros, and removed on exit (success or failure).
-fn cmd_edit(args: &[String]) -> Cmd {
-    let (profile, _args) = resolve_profile(args)?;
-    let paths = layout::locate(&profile)?;
-    // Decrypt current contents to text.
-    let secrets = load_secrets(&profile)?;
-    let mut initial = render_dotenv(secrets.pairs());
-    drop(secrets); // scrub the decrypted values now; the plaintext lives on only in `initial`
-
-    // Temp file next to the identity (a per-user, non-repo, ideally-0600 location).
-    let tmp = layout::identity_path()
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(".envstow-edit.tmp");
-    if let Some(parent) = tmp.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Err(e) = write_private_file(&tmp, initial.as_bytes()) {
-        initial.zeroize();
-        return Err(AppError::msg(format!("could not create temp file: {e}")));
-    }
-    initial.zeroize();
-
-    // Launch $EDITOR (fall back to a sensible default) on the temp file.
-    let editor = env::var_os("EDITOR")
-        .or_else(|| env::var_os("VISUAL"))
-        .unwrap_or_else(|| OsString::from(if cfg!(windows) { "notepad" } else { "vi" }));
-    let status = Command::new(&editor).arg(&tmp).status();
-
-    // Re-encrypt on a clean editor exit; the temp file is shredded either way (below).
-    let result: Cmd = match status {
-        Ok(s) if s.success() => match std::fs::read_to_string(&tmp) {
-            Ok(mut edited) => {
-                let new_secrets = Secrets::from_pairs(crypto::parse_dotenv(&edited));
-                edited.zeroize();
-                write_secrets(&paths.recipients, &paths.store, &new_secrets)
-            }
-            Err(e) => Err(AppError::msg(format!("could not read edited file: {e}"))),
-        },
-        Ok(_) => Err(AppError::msg(
-            "editor exited non-zero — store left unchanged.",
-        )),
-        Err(e) => Err(AppError::msg(format!(
-            "could not launch editor '{}': {e}",
-            editor.to_string_lossy()
-        ))),
-    };
-
-    shred_and_remove(&tmp);
-    result?;
-    eprintln!("✔  store updated.");
-    session::nudge_if_unlocked_shell();
-    Ok(())
-}
-
-/// Write `bytes` to `path`, creating it 0600 on Unix (best-effort on Windows).
-fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)?;
-        f.write_all(bytes)?;
-        f.flush()
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, bytes)
-    }
-}
-
-/// Best-effort shred: overwrite the file with zeros of the same length, then remove it.
-fn shred_and_remove(path: &Path) {
-    if let Ok(meta) = std::fs::metadata(path) {
-        let len = meta.len() as usize;
-        if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(path) {
-            let zeros = vec![0u8; len.min(1 << 20)];
-            let mut remaining = len;
-            while remaining > 0 {
-                let n = remaining.min(zeros.len());
-                if f.write_all(&zeros[..n]).is_err() {
-                    break;
-                }
-                remaining -= n;
-            }
-            let _ = f.flush();
-        }
-    }
-    let _ = std::fs::remove_file(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -891,12 +848,13 @@ fn print_help() {
          \x20 envstow get <NAME> [--show]      Resolve one secret (masked under an agent).\n\
          \x20 envstow set <NAME> [--clipboard] Read a value from stdin (or clipboard) and store it.\n\
          \x20 envstow delete <NAME>            Remove one secret and re-encrypt (then rotate).\n\
-         \x20 envstow edit                     Edit all secrets in $EDITOR (decrypt/re-encrypt).\n\
          \x20 envstow list                     List secret NAMES (never values).\n\
          \x20 envstow pubkey                   Print your age PUBLIC key (share it to be added).\n\
          \x20 envstow unlock [-- <cmd>...]     Subshell / run a command with the whole env set.\n\
+         \x20 envstow env [--off]              Load (or --off: unset) secrets in THIS shell: eval \"$(envstow env)\".\n\
          \x20 envstow refresh                  Unset secrets that left the store: eval \"$(envstow refresh)\".\n\
          \x20 envstow status                   Show whether you're unlocked, the profile, and secret NAMES.\n\
+         \x20 envstow shell-init               Print a shell wrapper so `set` in an unlocked shell goes live: eval \"$(envstow shell-init)\".\n\
          \x20 envstow init [--no-skill]        Create identity + recipients + store; add agent skill.\n\
          \x20 envstow add-recipient <age1..>   Add a collaborator and re-encrypt.\n\
          \x20 envstow remove-recipient <k|nm>  Remove a collaborator and re-encrypt (then rotate).\n\

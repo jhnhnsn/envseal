@@ -545,7 +545,7 @@ mod tests {
 
     #[test]
     fn write_store_refuses_to_downgrade_a_newer_store() {
-        // No CLI path reaches this today — set/delete/edit all decrypt first, so the READ guard
+        // No CLI path reaches this today — set/delete both decrypt first, so the READ guard
         // fires before this one. It's a backstop: it makes downgrade-safety a property of the
         // layout layer, so a future command that writes without reading first can't silently
         // break a newer teammate's store. Tested here because only a unit test can reach it.

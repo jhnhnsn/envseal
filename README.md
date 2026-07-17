@@ -218,6 +218,20 @@ holding your public key, and an empty store. Idempotent.
 That's it if you're working **solo** — no git, no sharing, nothing else to do. The folder is the
 scope; `.envstow/` stays local until you decide otherwise.
 
+**Optional: one line in your shell rc.** Everything below works with the bare binary — envstow
+prints the exact `eval` line to run whenever your shell needs it. If you'd rather skip even
+that, add the shell hook to `~/.zshrc` / `~/.bashrc`:
+
+```bash
+eval "$(envstow shell-init)"
+```
+
+It installs a small wrapper function so that `envstow set NAME` run *inside* an unlocked shell
+makes the new value live in that shell immediately — no reminder, no re-unlock. (`delete`
+still prints the one-line reminder; see
+[Stale secrets](#stale-secrets-in-an-unlocked-shell).) Like direnv's hook, this is a
+convenience, not a dependency: nothing else in envstow needs it.
+
 **Want teammates to have it?** Commit the folder — it's encrypted:
 
 ```bash
@@ -238,7 +252,6 @@ pbpaste | envstow set MY_SUPER_SECRET_KEY                   # macOS: paste from 
 
 envstow set MY_SUPER_SECRET_KEY                             # …or run bare, then paste + Enter
 printf 'sk-proj-abc123' | envstow set MY_SUPER_SECRET_KEY   # …or pipe a literal
-envstow edit                                           # …or edit them all in $EDITOR
 envstow list                                           # names only, never values
 envstow delete MY_SUPER_SECRET_KEY                     # remove one (then rotate it at the source)
 ```
@@ -344,7 +357,7 @@ Most commands are identical — `envstow init`, `list`, `pubkey`, `add-recipient
 `envstow unlock -- <program>` all work as-is. Only a few things differ:
 
 ```powershell
-# Your identity lives at %APPDATA%\envstow\identity.txt; `edit` opens Notepad.
+# Your identity lives at %APPDATA%\envstow\identity.txt.
 'sk-proj-abc123' | envstow set MY_SUPER_SECRET_KEY     # PowerShell pipes a value to stdin
 envstow unlock -- npm run build                   # runs the program directly — same as POSIX
 
@@ -370,7 +383,7 @@ envstow set GCP_CREDS < service-account.json
 Under the hood, multi-line values are base64-encoded inside the store (so the on-disk dotenv
 stays one line per key); `unlock`/`get` decode them transparently, so the env var your program
 sees is the exact original. Single-line secrets are stored as-is. Pasting a multi-line value
-into the interactive prompt won't work — pipe it or use `envstow edit`.
+into the interactive prompt won't work — pipe it (`cat key.pem | envstow set TLS_KEY`).
 
 ### Profiles
 
@@ -400,13 +413,15 @@ env var > `default`. Using a profile that doesn't exist errors and tells you to
 | `envstow init` | Generate identity, create `recipients` + empty store in this folder. Idempotent. |
 | `envstow set <NAME> [--clipboard]` | Store a value read from **stdin**, or the OS clipboard with `--clipboard` (`-c`). Never in argv either way. |
 | `envstow delete <NAME> [--force]` | Remove one secret; re-encrypt (then **rotate**). Confirms on a TTY. |
-| `envstow edit` | Decrypt all secrets into `$EDITOR`, re-encrypt on save (temp file shredded). |
 | `envstow get <NAME> [--show]` | Resolve one secret by name. **Masked under an agent** unless `--show`. |
 | `envstow list` | List secret **names** (never values). |
 | `envstow pubkey` | Print your age **public** key, to share so a member can add you. |
 | `envstow unlock [-- <cmd>]` | Run a command (or subshell) with every secret set as an env var. |
 | `envstow status` | Show whether you're in an unlocked shell, which profile, and the loaded secret **names** (never values; reads only env markers). |
-| `eval "$(envstow refresh)"` | Optional: unset *deleted* names an unlocked shell still holds, without restarting it (emits only `unset`). For any store change, `exit` + `envstow unlock` is the simple rule — see [Stale secrets](#stale-secrets-in-an-unlocked-shell). |
+| `eval "$(envstow env)"` | Load — or reset, after a store change — every secret in **this** shell, no subshell. Refuses under an agent and when stdout is a terminal; see [Stale secrets](#stale-secrets-in-an-unlocked-shell). |
+| `eval "$(envstow env --off)"` | Unset everything envstow set in this shell (names only — needs no key). |
+| `eval "$(envstow refresh)"` | Unset *deleted* names an unlocked shell still holds (emits only `unset`, never a value — safe anywhere `env` isn't). |
+| `eval "$(envstow shell-init)"` | (In your shell rc, optional) install the wrapper so `set` inside an unlocked shell goes live instantly — see [First-time setup](#1-first-time-setup). |
 | `envstow add-recipient <age1…> [label]` | Add a collaborator **and** re-encrypt — both steps. |
 | `envstow remove-recipient <key\|label>` | Remove a collaborator; re-encrypt (then **rotate**). |
 | `envstow reencrypt` | Re-encrypt to the current `recipients` — after someone's key was added by hand or by their `init`. |
@@ -501,27 +516,30 @@ group or other — a loose key decrypts every store you can. Fix with `chmod 600
 ## Stale secrets in an unlocked shell
 
 An `envstow unlock` shell got its environment **at spawn time, as a copy**. If you change the
-store afterwards — `set`, `delete`, or `edit` — the running shell keeps the *old* values. No
+store afterwards — a `set` or a `delete` — the running shell keeps the *old* values. No
 process can reach into a running one and change its environment; that's an OS boundary, not an
 envstow limitation.
 
-So after any change to the store while unlocked, refresh your shell by restarting it:
+So after any change to the store while unlocked, reset your shell's values in place:
 
 ```bash
-exit            # leave the unlocked shell (drops its stale environment)
-envstow unlock  # start a fresh one — reads the store as it is now
+eval "$(envstow env)"   # re-export everything from the store, unset what left it
 ```
 
-This is the one consistent answer for every kind of change (added, changed, or deleted secret),
-and it keeps you in control: you decide when to drop the shell rather than having a command
-restart it — or worse, print a value — on your behalf.
+(envstow reminds you of this line after any `set`/`delete` made inside an unlocked
+shell.) One consistent answer for every kind of change — added, changed, or deleted. If you'd
+rather not patch in place, `exit` + `envstow unlock` always works too, and remains the way
+agents pick up changes. And with the optional [shell hook](#1-first-time-setup) sourced, `set`
+skips even the reminder — the new value goes live in your shell the moment it's stored.
 
-> Why not "patch the current shell in place"? The only way to alter a running shell's environment
-> is to print shell code it evaluates — and updating a value would mean printing that value to
-> stdout, the one thing envstow exists to prevent (and catastrophic under an agent, which captures
-> stdout). `exit` + `unlock` sidesteps that entirely: the fresh child reads the store directly, no
-> value ever printed. (`envstow refresh` can emit `unset` lines for *deleted* names if you'd rather
-> not restart, but `exit` + `unlock` is the simple, uniform rule.)
+> How can this be safe, when the only way to alter a running shell's environment is to print
+> shell code for it to evaluate — values included? Because `envstow env` only ever emits into an
+> eval: it **refuses when stdout is a terminal** (so a bare `envstow env` can't splash values on
+> screen) and **refuses under an AI agent** (whose captured stdout is a transcript — agents are
+> pointed back to `unlock`). Values are single-quoted so hostile content is inert, names must be
+> plain identifiers, and the plaintext transits only the pipe between the binary and your shell —
+> never disk, never argv. The same guarded channel powers `eval "$(envstow env --off)"`, which
+> unsets everything envstow set here (that direction prints only names, so it's safe anywhere).
 
 ---
 

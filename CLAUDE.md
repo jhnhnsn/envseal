@@ -33,12 +33,14 @@ install or invoke.
 - `envstow set <NAME> [--clipboard]` — store a value read from **stdin**, or the OS clipboard
   with `--clipboard`. Both keep the value off the command line.
 - `envstow delete <NAME>` — remove one secret and re-encrypt (`--force` to skip the prompt).
-- `envstow edit` — open all secrets in `$EDITOR` (decrypt → edit → re-encrypt).
 - `envstow list` — list secret **names** (never values).
-- After any store change (`set`/`delete`/`edit`) made **inside** an unlocked shell, the running
+- After any store change (`set`/`delete`) made **inside** an unlocked shell, the running
   shell still holds the old values — `exit` and `envstow unlock` again to pick up the change.
   (`eval "$(envstow refresh)"` can unset deleted names in place, but `exit` + `unlock` is the
   uniform rule.)
+- `envstow env` is **human-only**: it prints plaintext `export` lines for the human's shell to
+  eval, and refuses under an agent. Do not run it or try to work around the refusal — that
+  refusal is working as intended. You pick up store changes via `unlock`, never `env`.
 - `envstow add-recipient <age1...>` / `remove-recipient <key|label>` — manage collaborators.
 - `envstow upgrade [--check]` — upgrade envstow itself. Safe to run `--check`; the human should run
   the actual upgrade (it needs `--yes` non-interactively and replaces the binary).

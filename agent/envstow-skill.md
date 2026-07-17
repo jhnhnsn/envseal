@@ -100,18 +100,23 @@ After changing secrets, remind the human to `git add .envstow && git commit`.
 ## Stale secrets after a change
 
 An unlocked shell holds a **copy** of the environment from when it started. If the store changes
-after that — a `set`, `delete`, or `edit` — the shell (and anything you run in it) still has the
+after that — a `set` or a `delete` — the shell (and anything you run in it) still has the
 **old** values. No process can modify a running process's environment.
 
-So after **any** change to the store while unlocked, tell the human to refresh the shell:
+So after **any** change to the store while unlocked, tell the human to reset their shell —
+either of these works, and envstow prints the same reminder after the change:
 
 ```bash
-exit            # leave the unlocked shell
-envstow unlock  # start a fresh one that reads the store as it is now
+eval "$(envstow env)"   # human-only: reset this shell's values in place
+# — or —
+exit && envstow unlock  # restart the unlocked shell
 ```
 
-This one step covers added, changed, and deleted secrets alike. (`envstow refresh` exists to
-unset deleted names in place, but `exit` + `unlock` is the simple, uniform answer — prefer it.)
+Both cover added, changed, and deleted secrets alike. `envstow env` is for the **human's**
+shell only — it prints plaintext for their shell to eval, and it refuses to run under an agent.
+That refusal is working as intended; never try to work around it. *You* pick up store changes
+by re-running `envstow unlock -- <cmd>`, which needs no reset at all — every `unlock` reads the
+store fresh.
 
 ## Removing a secret
 

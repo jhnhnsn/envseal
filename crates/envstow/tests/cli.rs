@@ -1,7 +1,7 @@
 //! End-to-end integration tests driving the real `envstow` binary in isolated temp dirs.
 //!
 //! These exercise the full lifecycle — init, set, list, unlock round-trip, get masking,
-//! edit, and multi-recipient add/remove — against the compiled binary, so they catch
+//! env/refresh eval payloads, and multi-recipient add/remove — against the compiled binary, so they catch
 //! regressions the in-crate unit tests can't (argument parsing, file layout, process spawn,
 //! the crypto round-trip through the actual store on disk).
 //!
@@ -148,26 +148,6 @@ struct Output {
     code: i32,
     stdout: String,
     stderr: String,
-}
-
-/// Write a directly-executable "editor" that appends `NEW=addedvalue` to the file it's given.
-/// A `.bat` on Windows, a `chmod +x` POSIX script elsewhere. Returns its path.
-fn write_fake_editor(dir: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        let editor = dir.join("fake_editor.bat");
-        // %~1 is the first arg; append a line. Echo is fine — the file is dotenv text.
-        std::fs::write(&editor, "@echo NEW=addedvalue>>%~1\r\n").unwrap();
-        editor
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let editor = dir.join("fake_editor.sh");
-        std::fs::write(&editor, "#!/bin/sh\nprintf 'NEW=addedvalue\\n' >> \"$1\"\n").unwrap();
-        std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
-        editor
-    }
 }
 
 /// Write a fake clipboard tool onto a private dir that echoes `contents`, named for whatever the
@@ -1206,11 +1186,11 @@ fn a_newer_format_store_is_refused_with_an_upgrade_hint() {
 }
 
 #[test]
-fn set_delete_edit_nudge_only_inside_an_unlocked_shell() {
+fn set_delete_nudge_only_inside_an_unlocked_shell() {
     let repo = Repo::new("nudge");
     assert_eq!(repo.run(&["init"], "").code, 0);
 
-    // Outside an unlocked shell: no nudge on any of the three.
+    // Outside an unlocked shell: no nudge on either mutation.
     let s = repo.run(&["set", "TOK"], "value1");
     assert!(
         !s.stderr.contains("unlocked shell"),
@@ -1218,7 +1198,7 @@ fn set_delete_edit_nudge_only_inside_an_unlocked_shell() {
         s.stderr
     );
 
-    // Inside an unlocked shell (ENVSTOW_UNLOCKED=1): each mutation nudges to exit + unlock.
+    // Inside an unlocked shell (ENVSTOW_UNLOCKED=1): each mutation nudges to reset the shell.
     let s2 = repo.run_env(&["set", "TOK"], "value2", "ENVSTOW_UNLOCKED", "1");
     assert!(
         s2.stderr.contains("unlocked shell") && s2.stderr.contains("envstow unlock"),
@@ -1239,25 +1219,22 @@ fn set_delete_edit_nudge_only_inside_an_unlocked_shell() {
         "delete inside unlock should nudge: {}",
         d.stderr
     );
+}
 
-    // edit inside an unlock: use the fake editor that appends a line, and set ENVSTOW_UNLOCKED.
-    let editor = write_fake_editor(&repo.dir);
-    let mut cmd = Command::new(BIN);
-    cmd.args(["edit"])
-        .current_dir(&repo.dir)
-        .env("ENVSTOW_IDENTITY", &repo.identity)
-        .env("EDITOR", editor.to_str().unwrap())
-        .env("ENVSTOW_UNLOCKED", "1")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    clear_agent_markers(&mut cmd);
-    let out = cmd.output().unwrap();
-    let err = String::from_utf8_lossy(&out.stderr);
+#[test]
+fn edit_is_removed_with_a_helpful_tombstone() {
+    // `edit` was removed (it parked the whole store's plaintext on disk for an editor session).
+    // Anyone who still types it gets pointed at set/delete, not a bare "unknown command".
+    let repo = Repo::new("editgone");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    let out = repo.run_env(&["edit"], "", "EDITOR", "cat");
+    assert_ne!(out.code, 0, "edit must no longer run");
     assert!(
-        err.contains("unlocked shell"),
-        "edit inside unlock should nudge: {err}"
+        out.stderr.contains("removed") && out.stderr.contains("envstow set"),
+        "tombstone should explain and redirect: {}",
+        out.stderr
     );
+    assert!(out.stdout.is_empty(), "edit must not decrypt anything");
 }
 
 #[test]
@@ -1331,44 +1308,6 @@ fn delete_is_scoped_to_one_profile() {
 
     let d = repo.run(&["unlock", "--", "sh", "-c", "printf '%s' \"$SHARED\""], "");
     assert_eq!(d.stdout, "default-val", "default profile must be untouched");
-}
-
-#[test]
-fn edit_updates_the_store() {
-    let repo = Repo::new("edit");
-    assert_eq!(repo.run(&["init"], "").code, 0);
-    assert_eq!(repo.run(&["set", "EXISTING"], "keepme").code, 0);
-
-    // A fake editor that appends a new secret line to the file it's given. Written per-OS so
-    // it's directly executable: a .bat on Windows, a chmod +x shell script elsewhere.
-    let editor = write_fake_editor(&repo.dir);
-
-    let out = repo.run_env(&["edit"], "", "EDITOR", editor.to_str().unwrap());
-    assert_eq!(out.code, 0, "edit failed: {}", out.stderr);
-
-    // Both the preserved and the new secret round-trip.
-    let check = repo.run(
-        &[
-            "unlock",
-            "--",
-            "sh",
-            "-c",
-            "test \"$EXISTING\" = keepme && test \"$NEW\" = addedvalue && echo OK",
-        ],
-        "",
-    );
-    assert!(
-        check.stdout.contains("OK"),
-        "edit round-trip failed: {} {}",
-        check.stdout,
-        check.stderr
-    );
-
-    // The edit temp file must not be left behind.
-    assert!(
-        !repo.dir.join(".envstow-edit.tmp").exists(),
-        "edit temp file should be shredded/removed"
-    );
 }
 
 #[cfg(unix)]
@@ -1592,4 +1531,130 @@ fn add_and_remove_recipient_controls_access() {
     // Refuse to remove the last recipient.
     let last = owner.run(&["remove-recipient", &owner.public_key()], "");
     assert_ne!(last.code, 0, "must refuse removing the last recipient");
+}
+
+// ---------------------------------------------------------------------------------------------
+// `env` — the eval-able current-shell loader
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn env_emits_only_shell_code_and_loads_via_eval() {
+    let repo = Repo::new("envcmd");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    // A hostile value: embedded single quote, `;`, and a command substitution. If quoting is
+    // wrong, the eval either breaks or EXECUTES it.
+    let hostile = "it's;$(echo pwned)";
+    assert_eq!(repo.run(&["set", "STAYS"], hostile).code, 0);
+
+    // Piped + non-agent (the harness default): stdout must be shell code only.
+    let out = repo.run(&["env"], "");
+    assert_eq!(out.code, 0, "env should succeed: {}", out.stderr);
+    for line in out.stdout.lines().filter(|l| !l.trim().is_empty()) {
+        assert!(
+            line.starts_with("export ") || line.starts_with("unset "),
+            "every eval line must be an export or unset, got {line:?}"
+        );
+    }
+    assert!(
+        out.stdout.contains("export ENVSTOW_UNLOCKED=1")
+            && out.stdout.contains("export ENVSTOW_LOADED="),
+        "must emit the session markers: {:?}",
+        out.stdout
+    );
+
+    // Round-trip: a shell that evals the output holds the exact value — unexecuted.
+    let bin = BIN;
+    let script = format!(
+        r#"
+        unset STAYS
+        eval "$({bin} env 2>/dev/null)"
+        printf '%s' "$STAYS"
+        "#
+    );
+    let evaled = repo.run(&["unlock", "--", "sh", "-c", &script], "");
+    assert_eq!(
+        evaled.stdout, hostile,
+        "eval must reproduce the value byte-for-byte, not execute it"
+    );
+    assert!(
+        !evaled.stdout.contains("pwned\n"),
+        "the $() must never run: {:?}",
+        evaled.stdout
+    );
+}
+
+#[test]
+fn env_syncs_a_changed_store_where_refresh_cannot() {
+    // The scenario the nudge points at: set/delete inside an unlocked shell, then
+    // eval "$(envstow env)" resets this shell's values — updated AND deleted both handled.
+    let repo = Repo::new("envsync");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "GONE"], "goneval").code, 0);
+    assert_eq!(repo.run(&["set", "STAYS"], "oldval").code, 0);
+
+    let bin = BIN;
+    let script = format!(
+        r#"
+        {bin} delete GONE --force >/dev/null 2>&1
+        printf 'newval' | {bin} set STAYS >/dev/null 2>&1
+        eval "$({bin} env 2>/dev/null)"
+        printf 'STAYS=%s GONE=%s' "$STAYS" "${{GONE:-unset}}"
+        "#
+    );
+    let out = repo.run(&["unlock", "--", "sh", "-c", &script], "");
+    assert_eq!(
+        out.stdout, "STAYS=newval GONE=unset",
+        "env must update changed values and unset deleted ones: {:?} / {}",
+        out.stdout, out.stderr
+    );
+}
+
+#[test]
+fn env_refuses_under_agent() {
+    let repo = Repo::new("envagent");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "TOK"], "secretval").code, 0);
+
+    let out = repo.run_env(&["env"], "", "CLAUDECODE", "1");
+    assert_ne!(out.code, 0, "env must refuse under an agent");
+    assert!(
+        out.stdout.is_empty(),
+        "not one byte on stdout under an agent: {:?}",
+        out.stdout
+    );
+    assert!(
+        !out.stderr.contains("secretval") && out.stderr.contains("unlock"),
+        "stderr should redirect the agent to unlock, without the value: {}",
+        out.stderr
+    );
+}
+
+#[test]
+fn env_off_unsets_names_without_needing_values() {
+    let repo = Repo::new("envoff");
+    assert_eq!(repo.run(&["init"], "").code, 0);
+    assert_eq!(repo.run(&["set", "TOK"], "secretval").code, 0);
+
+    let bin = BIN;
+    let script = format!(
+        r#"
+        eval "$({bin} env --off 2>/dev/null)"
+        printf 'TOK=%s UNLOCKED=%s' "${{TOK:-unset}}" "${{ENVSTOW_UNLOCKED:-unset}}"
+        "#
+    );
+    let out = repo.run(&["unlock", "--", "sh", "-c", &script], "");
+    assert_eq!(
+        out.stdout, "TOK=unset UNLOCKED=unset",
+        "--off must clear the secrets and the markers: {:?} / {}",
+        out.stdout, out.stderr
+    );
+
+    // --off prints names only, so it is allowed even under an agent.
+    let agent = repo.run_env(&["env", "--off"], "", "CLAUDECODE", "1");
+    assert_eq!(
+        agent.code, 0,
+        "--off is name-only, agent-safe: {}",
+        agent.stderr
+    );
+    assert!(!agent.stdout.contains("secretval") && !agent.stderr.contains("secretval"));
 }

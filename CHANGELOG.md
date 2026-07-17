@@ -2,6 +2,36 @@
 
 All notable changes to envstow are documented here. Versions follow [SemVer](https://semver.org).
 
+## 0.1.21
+
+### Added
+- **`envstow env [--off]`** — load (or reset) every secret **in your current shell**, no subshell:
+  ```bash
+  eval "$(envstow env)"        # export the store into this shell; unset what left it
+  eval "$(envstow env --off)"  # unset everything envstow set here (names only — needs no key)
+  ```
+  This is the one command that prints plaintext values, so it is guarded twice: it **refuses under
+  an AI agent** (agents keep using `unlock -- <cmd>`) and **refuses when stdout is a terminal** —
+  output only ever flows into an eval pipe, never onto a screen or into a transcript. Values are
+  single-quoted so hostile content is inert when eval'd; names must be plain shell identifiers.
+  Unlike `refresh` (which could only `unset` deleted names), one eval also picks up **changed**
+  values — so it's the uniform answer to a stale unlocked shell.
+- **Stale-shell reminders now print the fix.** A `set` or `delete` inside an unlocked shell prints
+  the exact line to run — `eval "$(envstow env)"` — alongside the old exit-and-re-unlock advice.
+- **`envstow shell-init` (optional)** — print a small wrapper function to source from your rc:
+  `eval "$(envstow shell-init)"`. With it sourced, `envstow set NAME` inside an unlocked shell
+  makes the new value live in that shell immediately (via an internal `set --export`), skipping
+  even the reminder. Like direnv's hook, it's a convenience — nothing else in envstow needs it.
+
+### Removed
+- **`envstow edit`.** It was the one command that parked the whole store's plaintext on disk for
+  an editor session: a crash or `kill -9` skips the shred; editors copy plaintext into swap, undo,
+  and backup files no shred can reach; zero-overwrite is ineffective on copy-on-write filesystems;
+  and it had no agent guard (`EDITOR=cat envstow edit` printed every value). With it gone,
+  "plaintext is never written to disk" holds **unconditionally**. `set` (pipe for multi-line
+  values) and `delete` cover all changes; typing `edit` now prints a tombstone pointing at them.
+  A bulk `import` from stdin may come later if there's real demand.
+
 ## 0.1.20
 
 ### Added
